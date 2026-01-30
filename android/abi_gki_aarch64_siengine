@@ -448,6 +448,7 @@
   __drm_atomic_helper_crtc_destroy_state
   __drm_atomic_helper_crtc_duplicate_state
   __drm_atomic_helper_crtc_reset
+  __drm_atomic_helper_disable_plane
   drm_atomic_helper_damage_iter_init
   drm_atomic_helper_damage_iter_next
   drm_atomic_helper_disable_plane
@@ -474,6 +475,10 @@
   drm_atomic_set_mode_for_crtc
   drm_atomic_state_alloc
   __drm_atomic_state_free
+  drm_client_modeset_commit
+  drm_client_modeset_dpms
+  drm_client_modeset_probe
+  drm_client_rotation
   drm_compat_ioctl
   drm_connector_attach_encoder
   drm_connector_cleanup
@@ -509,6 +514,7 @@
   drm_display_mode_from_cea_vic
   drm_display_mode_from_videomode
   drm_do_get_edid
+  drm_driver_legacy_fb_format
   drm_edid_dup
   drm_edid_duplicate
   drm_edid_free
@@ -519,6 +525,7 @@
   __drm_err
   drm_format_info_block_height
   drm_format_info_block_width
+  drm_format_info_bpp
   drm_framebuffer_cleanup
   drm_framebuffer_init
   drm_gem_create_mmap_offset
@@ -541,6 +548,8 @@
   drm_kms_helper_hotplug_event
   drm_kms_helper_poll_fini
   drm_kms_helper_poll_init
+  drm_master_internal_acquire
+  drm_master_internal_release
   drmm_mode_config_init
   drm_mode_config_cleanup
   drm_mode_config_helper_resume
@@ -555,6 +564,7 @@
   drm_mode_prune_invalid
   drm_modeset_acquire_fini
   drm_modeset_acquire_init
+  drm_mode_set_config_internal
   drm_mode_set_crtcinfo
   drm_modeset_drop_locks
   drm_modeset_lock
@@ -601,6 +611,7 @@
   drm_vblank_work_cancel_sync
   drm_vblank_work_init
   drm_vblank_work_schedule
+  drm_vma_node_revoke
   drm_writeback_connector_init
   drm_writeback_queue_job
   drm_writeback_signal_completion
@@ -644,6 +655,7 @@
   __flush_workqueue
   __folio_lock
   __folio_put
+  folio_mkclean
   for_each_kernel_tracepoint
   fortify_panic
   fput
@@ -1084,6 +1096,7 @@
   nla_reserve
   __nla_validate
   nonseekable_open
+  noop_dirty_folio
   noop_llseek
   nr_cpu_ids
   nr_irqs
@@ -1351,6 +1364,7 @@
   __register_rpmsg_driver
   register_shrinker
   register_syscore_ops
+  register_sysrq_key
   register_virtio_device
   register_virtio_driver
   regmap_bulk_read
@@ -1720,6 +1734,7 @@
   unregister_restart_handler
   unregister_rpmsg_driver
   unregister_shrinker
+  unregister_sysrq_key
   unregister_virtio_device
   unregister_virtio_driver
   up
