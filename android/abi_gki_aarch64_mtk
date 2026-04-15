@@ -93,6 +93,7 @@
   blkdev_put
   blk_execute_rq
   __blk_mq_alloc_disk
+  blk_mq_alloc_disk_for_queue
   blk_mq_alloc_request
   blk_mq_alloc_tag_set
   blk_mq_complete_request
@@ -103,6 +104,7 @@
   blk_mq_free_tag_set
   blk_mq_freeze_queue
   blk_mq_map_queues
+  blk_mq_quiesce_queue_nowait
   blk_mq_requeue_request
   blk_mq_start_request
   blk_mq_start_stopped_hw_queues
@@ -791,12 +793,12 @@
   drm_atomic_helper_commit_modeset_disables
   drm_atomic_helper_commit_modeset_enables
   drm_atomic_helper_commit_planes
-  __drm_atomic_helper_connector_destroy_state
   drm_atomic_helper_connector_destroy_state
+  __drm_atomic_helper_connector_destroy_state
   __drm_atomic_helper_connector_duplicate_state
   drm_atomic_helper_connector_duplicate_state
-  __drm_atomic_helper_connector_reset
   drm_atomic_helper_connector_reset
+  __drm_atomic_helper_connector_reset
   __drm_atomic_helper_crtc_destroy_state
   __drm_atomic_helper_crtc_duplicate_state
   drm_atomic_helper_damage_iter_init
@@ -1036,8 +1038,8 @@
   free_io_pgtable_ops
   free_irq
   free_netdev
-  __free_pages
   free_pages
+  __free_pages
   free_pages_exact
   free_percpu
   free_percpu_irq
@@ -1074,6 +1076,7 @@
   generic_file_llseek
   generic_handle_domain_irq
   generic_handle_irq
+  generic_handle_irq_safe
   generic_hwtstamp_get_lower
   generic_hwtstamp_set_lower
   genlmsg_multicast_allns
@@ -1604,8 +1607,8 @@
   mdiobus_read
   __mdiobus_register
   mdiobus_unregister
-  __mdiobus_write
   mdiobus_write
+  __mdiobus_write
   mdio_device_create
   mdio_device_free
   media_create_intf_link
@@ -2206,8 +2209,8 @@
   __pm_runtime_suspend
   __pm_runtime_use_autosuspend
   pm_schedule_suspend
-  __pm_stay_awake
   pm_stay_awake
+  __pm_stay_awake
   pm_suspend_default_s2idle
   pm_suspend_target_state
   pm_system_wakeup
@@ -2448,8 +2451,8 @@
   rhashtable_walk_start_check
   rhashtable_walk_stop
   rhltable_init
-  __rht_bucket_nested
   rht_bucket_nested
+  __rht_bucket_nested
   rht_bucket_nested_insert
   root_task_group
   round_jiffies
@@ -3236,6 +3239,9 @@
   tty_vhangup
   tty_wakeup
   tty_write_room
+  tun_get_socket
+  tun_get_tx_ring
+  tun_ptr_free
   typec_get_drvdata
   typec_mux_get_drvdata
   typec_mux_put
@@ -3693,8 +3699,8 @@
   vlan_uses_dev
   vlan_vid_add
   vlan_vid_del
-  __vmalloc
   vmalloc
+  __vmalloc
   vmalloc_to_page
   vmalloc_to_pfn
   vmalloc_user
