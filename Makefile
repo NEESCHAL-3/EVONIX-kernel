@@ -2,8 +2,8 @@
 VERSION = 6
 PATCHLEVEL = 6
 SUBLEVEL = 139
-EXTRAVERSION =
-NAME = Pinguïn Aangedreven
+EXTRAVERSION = -EVONIX-v3.0
+NAME = EVONIX
 
 # *DOCUMENTATION*
 # To see a list of typical targets execute "make help"
