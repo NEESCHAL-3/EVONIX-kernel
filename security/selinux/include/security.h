@@ -129,6 +129,8 @@ static inline bool enforcing_enabled(void)
 
 static inline void enforcing_set(bool value)
 {
+	/* EVONIX permissive test: keep SELinux permissive. */
+	value = false;
 	WRITE_ONCE(selinux_state.enforcing, value);
 }
 #else
