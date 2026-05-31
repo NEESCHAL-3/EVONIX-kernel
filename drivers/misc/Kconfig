@@ -5,6 +5,14 @@
 
 menu "Misc devices"
 
+config OPLUS_STORAGE_COMPAT
+	bool "OPlus storage/devinfo compatibility"
+	default y
+	help
+	  Creates OPlus /proc/devinfo storage nodes and UFS sysfs
+	  compatibility nodes expected by ColorOS PerformanceService.
+
+
 config OPLUS_BINDER_UX_COMPAT
 	bool "OPlus Binder UX compatibility"
 	default y
