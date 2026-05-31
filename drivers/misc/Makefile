@@ -72,3 +72,4 @@ obj-$(CONFIG_PKVM_SMC_FILTER)  += pkvm-smc/
 obj-$(CONFIG_OPLUS_SCHED_REAL) += oplus_sched_real.o
 obj-$(CONFIG_OPLUS_BINDER_UX_COMPAT) += oplus_binder_ux.o
 obj-$(CONFIG_OPLUS_STORAGE_COMPAT) += oplus_storage_compat.o
+obj-$(CONFIG_OPLUS_AFS_COMPAT) += oplus_afs_compat.o

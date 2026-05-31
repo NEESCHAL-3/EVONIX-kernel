@@ -5,6 +5,14 @@
 
 menu "Misc devices"
 
+config OPLUS_AFS_COMPAT
+	bool "OPlus AFS compatibility"
+	default y
+	help
+	  Creates /proc/oplus_afs_config nodes and accepts the real
+	  ColorOS AFS protobuf-converted ioctl scene table.
+
+
 config OPLUS_STORAGE_COMPAT
 	bool "OPlus storage/devinfo compatibility"
 	default y
