@@ -2,13 +2,11 @@
 /*
  * OPlus scheduler compatibility layer for ColorOS bringup.
  *
- * Real v1 behavior:
+ * Real v2 behavior:
  * - Creates OPlus scheduler proc/sysctl nodes expected by ColorOS.
- * - Parses PID/TGID writes from OPlus PerformanceService.
- * - Applies real Linux scheduler boost using set_user_nice().
- *
- * This is not a full OPlus scheduler port, but it is functional behavior,
- * not a dummy ENOENT silencer.
+ * - Handles OPlus payloads such as: "p <pid> <flag>".
+ * - Maps important task / UX / im_flag hints to real Linux scheduler nice boost.
+ * - Keeps high-frequency logs quiet to avoid performance regression.
  */
 
 #include <linux/init.h>
@@ -23,10 +21,11 @@
 #include <linux/sched/task.h>
 #include <linux/sysctl.h>
 #include <linux/ctype.h>
+#include <linux/string.h>
 
-#define OPLUS_BUF_SZ 256
-#define OPLUS_BOOST_NICE (-10)
-#define OPLUS_NORMAL_NICE (0)
+#define OPLUS_BUF_SZ		256
+#define OPLUS_BOOST_LIGHT	(-5)
+#define OPLUS_BOOST_STRONG	(-10)
 
 static DEFINE_MUTEX(oplus_sched_lock);
 
@@ -39,6 +38,7 @@ static int sched_impt_tgid;
 static int audio_enable;
 static int disable_setting;
 static int im_flag;
+static int im_flag_app;
 static int sched_prop;
 static int tpd_id;
 static int tpd_cmds;
@@ -48,6 +48,7 @@ static struct ctl_table_header *oplus_sysctl_header;
 enum oplus_node_type {
 	NODE_DISABLE_SETTING,
 	NODE_IM_FLAG,
+	NODE_IM_FLAG_APP,
 	NODE_SCHED_ASSIST_SCENE,
 	NODE_SCHED_IMPT_TASK,
 	NODE_SCHED_PROP,
@@ -68,7 +69,6 @@ static int oplus_boost_pid(pid_t pid, int nice)
 {
 	struct task_struct *task;
 	struct pid *kpid;
-	int ret = -ESRCH;
 
 	if (pid <= 0)
 		return -EINVAL;
@@ -85,49 +85,101 @@ static int oplus_boost_pid(pid_t pid, int nice)
 	}
 
 	set_user_nice(task, nice);
-	pr_info("oplus_sched_real: boosted pid=%d comm=%s nice=%d\n",
-		pid, task->comm, nice);
+
+	pr_debug("oplus_sched_real: boosted pid=%d comm=%s nice=%d\n",
+		 pid, task->comm, nice);
 
 	put_task_struct(task);
 	put_pid(kpid);
 
-	ret = 0;
-	return ret;
+	return 0;
 }
 
-static void oplus_parse_and_boost_pids(const char *buf, int nice)
+static int oplus_nice_from_flag(long flag)
+{
+	if (flag >= 64)
+		return OPLUS_BOOST_STRONG;
+
+	if (flag > 0)
+		return OPLUS_BOOST_LIGHT;
+
+	return OPLUS_BOOST_LIGHT;
+}
+
+static const char *oplus_skip_to_number(const char *p)
+{
+	while (*p && !isdigit(*p) && *p != '-')
+		p++;
+	return p;
+}
+
+static int oplus_read_long(const char **pp, long *out)
+{
+	const char *p = *pp;
+	long val = 0;
+	int neg = 0;
+	int found = 0;
+
+	p = oplus_skip_to_number(p);
+
+	if (!*p)
+		return -EINVAL;
+
+	if (*p == '-') {
+		neg = 1;
+		p++;
+	}
+
+	while (isdigit(*p)) {
+		found = 1;
+		val = val * 10 + (*p - '0');
+		p++;
+	}
+
+	if (!found)
+		return -EINVAL;
+
+	if (neg)
+		val = -val;
+
+	*out = val;
+	*pp = p;
+
+	return 0;
+}
+
+/*
+ * Handles common OPlus payloads:
+ *   "p 2732 74"
+ *   "p 2732 10"
+ *   "2732"
+ *   "2732 74"
+ *
+ * We boost only the PID/TID, not every number in the string.
+ */
+static void oplus_handle_task_payload(const char *buf)
 {
 	const char *p = buf;
+	long pid = 0;
+	long flag = 1;
+	int nice;
 
-	while (*p) {
-		long val;
-		int neg = 0;
+	/* Skip leading command char like 'p' if present. */
+	if (*p && !isdigit(*p) && *p != '-')
+		p++;
 
-		while (*p && !isdigit(*p) && *p != '-')
-			p++;
+	if (oplus_read_long(&p, &pid))
+		return;
 
-		if (!*p)
-			break;
+	/* Optional second number is usually flag/class. */
+	oplus_read_long(&p, &flag);
 
-		if (*p == '-') {
-			neg = 1;
-			p++;
-		}
+	nice = oplus_nice_from_flag(flag);
 
-		if (!isdigit(*p))
-			continue;
-
-		val = 0;
-		while (isdigit(*p)) {
-			val = val * 10 + (*p - '0');
-			p++;
-		}
-
-		if (neg)
-			val = -val;
-
-		if (val > 0)
-			oplus_boost_pid((pid_t)val, nice);
+	if (pid > 0) {
+		oplus_boost_pid((pid_t)pid, nice);
+		pr_debug("oplus_sched_real: task payload pid=%ld flag=%ld nice=%d raw=%s",
+			 pid, flag, nice, buf);
 	}
 }
 
@@ -152,10 +204,10 @@ static ssize_t oplus_write(struct file *file, const char __user *ubuf,
 {
 	struct oplus_node *node = pde_data(file_inode(file));
 	char buf[OPLUS_BUF_SZ];
+	const char *p;
 	size_t len;
 	long first = 0;
 	int has_first = 0;
-	char *p;
 
 	if (!node)
 		return -EINVAL;
@@ -169,10 +221,7 @@ static ssize_t oplus_write(struct file *file, const char __user *ubuf,
 	buf[len] = '\0';
 
 	p = buf;
-	while (*p && !isdigit(*p) && *p != '-')
-		p++;
-
-	if (*p && !kstrtol(p, 10, &first))
+	if (!oplus_read_long(&p, &first))
 		has_first = 1;
 
 	mutex_lock(&oplus_sched_lock);
@@ -181,52 +230,65 @@ static ssize_t oplus_write(struct file *file, const char __user *ubuf,
 	case NODE_SCHED_ASSIST_SCENE:
 		if (has_first)
 			sched_assist_scene = first;
-		pr_info("oplus_sched_real: scene=%d raw=%s", sched_assist_scene, buf);
+		pr_debug("oplus_sched_real: scene=%d raw=%s",
+			 sched_assist_scene, buf);
 		break;
 
 	case NODE_SCHED_IMPT_TASK:
 	case NODE_UX_TASK:
 		if (has_first)
 			sched_impt_tgid = first;
-		pr_info("oplus_sched_real: task_boost raw=%s", buf);
 		mutex_unlock(&oplus_sched_lock);
-		oplus_parse_and_boost_pids(buf, OPLUS_BOOST_NICE);
+		oplus_handle_task_payload(buf);
+		return count;
+
+	case NODE_IM_FLAG:
+		if (has_first)
+			im_flag = first;
+		mutex_unlock(&oplus_sched_lock);
+		oplus_handle_task_payload(buf);
+		return count;
+
+	case NODE_IM_FLAG_APP:
+		if (has_first)
+			im_flag_app = first;
+		mutex_unlock(&oplus_sched_lock);
+		oplus_handle_task_payload(buf);
 		return count;
 
 	case NODE_AUDIO_ENABLE:
 		if (has_first)
 			audio_enable = first ? 1 : 0;
-		pr_info("oplus_sched_real: audio_enable=%d raw=%s", audio_enable, buf);
+		pr_debug("oplus_sched_real: audio_enable=%d raw=%s",
+			 audio_enable, buf);
 		break;
 
 	case NODE_DISABLE_SETTING:
 		if (has_first)
 			disable_setting = first;
-		pr_info("oplus_sched_real: disable_setting=%d raw=%s", disable_setting, buf);
-		break;
-
-	case NODE_IM_FLAG:
-		if (has_first)
-			im_flag = first;
-		pr_info("oplus_sched_real: im_flag=%d raw=%s", im_flag, buf);
+		pr_debug("oplus_sched_real: disable_setting=%d raw=%s",
+			 disable_setting, buf);
 		break;
 
 	case NODE_SCHED_PROP:
 		if (has_first)
 			sched_prop = first;
-		pr_info("oplus_sched_real: sched_prop=%d raw=%s", sched_prop, buf);
+		pr_debug("oplus_sched_real: sched_prop=%d raw=%s",
+			 sched_prop, buf);
 		break;
 
 	case NODE_TPD_ID:
 		if (has_first)
 			tpd_id = first;
-		pr_info("oplus_sched_real: tpd_id=%d raw=%s", tpd_id, buf);
+		pr_debug("oplus_sched_real: tpd_id=%d raw=%s",
+			 tpd_id, buf);
 		break;
 
 	case NODE_TPD_CMDS:
 		if (has_first)
 			tpd_cmds = first;
-		pr_info("oplus_sched_real: tpd_cmds=%d raw=%s", tpd_cmds, buf);
+		pr_debug("oplus_sched_real: tpd_cmds=%d raw=%s",
+			 tpd_cmds, buf);
 		break;
 	}
 
@@ -246,6 +308,7 @@ static const struct proc_ops oplus_ops = {
 static struct oplus_node nodes[] = {
 	{ "disable_setting", NODE_DISABLE_SETTING, &disable_setting, NULL },
 	{ "im_flag", NODE_IM_FLAG, &im_flag, NULL },
+	{ "im_flag_app", NODE_IM_FLAG_APP, &im_flag_app, NULL },
 	{ "sched_assist_scene", NODE_SCHED_ASSIST_SCENE, &sched_assist_scene, NULL },
 	{ "sched_impt_task", NODE_SCHED_IMPT_TASK, &sched_impt_tgid, NULL },
 	{ "sched_prop", NODE_SCHED_PROP, &sched_prop, NULL },
@@ -263,7 +326,7 @@ static int sched_impt_tgid_handler(struct ctl_table *table, int write,
 	ret = proc_dointvec(table, write, buffer, lenp, ppos);
 
 	if (!ret && write && sched_impt_tgid > 0)
-		oplus_boost_pid(sched_impt_tgid, OPLUS_BOOST_NICE);
+		oplus_boost_pid(sched_impt_tgid, OPLUS_BOOST_STRONG);
 
 	return ret;
 }
@@ -318,7 +381,7 @@ static int __init oplus_sched_real_init(void)
 	if (!oplus_sysctl_header)
 		pr_warn("oplus_sched_real: failed to register sysctl nodes\n");
 
-	pr_info("oplus_sched_real: real OPlus scheduler compatibility active\n");
+	pr_info("oplus_sched_real: real OPlus scheduler compatibility active v2\n");
 	return 0;
 
 err_nodes:
