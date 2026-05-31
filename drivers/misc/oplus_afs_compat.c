@@ -24,6 +24,7 @@
 #include <linux/types.h>
 
 #define OPLUS_AFS_IOCTL_UPDATE_CONFIG 0x40107101
+#define OPLUS_AFS_IOCTL_GET_SCENE     0x800c7102
 #define OPLUS_AFS_MAX_SCENES          512
 
 struct oplus_afs_user_config {
@@ -38,6 +39,11 @@ struct oplus_afs_scene_entry {
 	__u8 enhance_level;
 	__u8 brk_type;
 	__u8 enable;
+} __packed;
+
+struct oplus_afs_get_scene_user {
+	__s32 scene_type;
+	struct oplus_afs_scene_entry scene;
 } __packed;
 
 static DEFINE_MUTEX(afs_lock);
@@ -106,12 +112,75 @@ static int oplus_afs_update_from_user(unsigned long arg)
 	return 0;
 }
 
+static int oplus_afs_get_scene_to_user(unsigned long arg)
+{
+	struct oplus_afs_get_scene_user req;
+	struct oplus_afs_scene_entry out = { 0 };
+	int i;
+	int found = 0;
+
+	if (!arg)
+		return -EINVAL;
+
+	if (copy_from_user(&req, (void __user *)arg, sizeof(req.scene_type)))
+		return -EFAULT;
+
+	mutex_lock(&afs_lock);
+
+	if (!afs_scene_table || afs_scene_count <= 0) {
+		mutex_unlock(&afs_lock);
+		return -ENOENT;
+	}
+
+	/* Fast path: scene type usually maps directly to table index. */
+	if (req.scene_type >= 0 && req.scene_type < afs_scene_count) {
+		out = afs_scene_table[req.scene_type];
+		if (out.scene_type == req.scene_type || out.enable)
+			found = 1;
+	}
+
+	/* Fallback: search actual scene_type field. */
+	if (!found) {
+		for (i = 0; i < afs_scene_count; i++) {
+			if (afs_scene_table[i].scene_type == req.scene_type) {
+				out = afs_scene_table[i];
+				found = 1;
+				break;
+			}
+		}
+	}
+
+	mutex_unlock(&afs_lock);
+
+	if (!found)
+		return -ENOENT;
+
+	/*
+	 * afsConfig.so passes 12 bytes:
+	 *   int scene_type;
+	 *   8-byte scene config payload;
+	 *
+	 * It reads returned payload from arg + 4.
+	 */
+	if (copy_to_user((void __user *)(arg + sizeof(__s32)),
+			 &out, sizeof(out)))
+		return -EFAULT;
+
+	pr_debug("oplus_afs_compat: get scene=%d anim=%u enhance=%u brk=%u enable=%u\n",
+		 req.scene_type, out.animation_type, out.enhance_level,
+		 out.brk_type, out.enable);
+
+	return 0;
+}
+
 static long oplus_afs_ioctl(struct file *file, unsigned int cmd,
 			    unsigned long arg)
 {
 	switch (cmd) {
 	case OPLUS_AFS_IOCTL_UPDATE_CONFIG:
 		return oplus_afs_update_from_user(arg);
+	case OPLUS_AFS_IOCTL_GET_SCENE:
+		return oplus_afs_get_scene_to_user(arg);
 	default:
 		return -ENOTTY;
 	}
