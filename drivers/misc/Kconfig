@@ -5,6 +5,14 @@
 
 menu "Misc devices"
 
+config OPLUS_FRAME_BOOST_COMPAT
+	bool "OPlus frame boost compatibility"
+	default y
+	help
+	  Creates /proc/oplus_frame_boost and /proc/sys/fbg nodes
+	  expected by ColorOS SchedAssist frame boost.
+
+
 config OPLUS_QOS_COMPAT
 	bool "OPlus QoS scheduler compatibility"
 	default y
