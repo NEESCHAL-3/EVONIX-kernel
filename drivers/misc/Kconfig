@@ -5,6 +5,14 @@
 
 menu "Misc devices"
 
+config OPLUS_SCHED_REAL
+	bool "Functional OPlus scheduler compatibility"
+	default y
+	help
+	  Creates ColorOS/OPlus scheduler nodes and maps important task
+	  writes to real Linux scheduler nice boosting.
+
+
 config SENSORS_LIS3LV02D
 	tristate
 	depends on INPUT
