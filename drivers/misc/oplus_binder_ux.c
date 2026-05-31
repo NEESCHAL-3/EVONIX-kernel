@@ -60,16 +60,29 @@ static int oplus_binder_ux_nice_from_flag(int flag)
 static int oplus_binder_ux_apply(int tid, int flag)
 {
 	struct task_struct *task;
-	struct pid *kpid;
+	struct pid *kpid = NULL;
 	int nice;
-
-	if (tid <= 0)
-		return -ESRCH;
+	int target_tid = tid;
 
 	if (flag < 0 || flag > 2)
 		return -EINVAL;
 
 	nice = oplus_binder_ux_nice_from_flag(flag);
+
+	/*
+	 * OPlus userspace may pass tid = -1 for "current/calling thread".
+	 * Do not reject it; apply the Binder UX hint to the ioctl caller.
+	 */
+	if (tid <= 0) {
+		task = current;
+		target_tid = task_pid_nr(task);
+
+		set_user_nice(task, nice);
+
+		pr_debug("oplus_binder_ux: current tid=%d comm=%s flag=%d nice=%d\n",
+			 target_tid, task->comm, flag, nice);
+		return 0;
+	}
 
 	rcu_read_lock();
 	kpid = find_get_pid(tid);
