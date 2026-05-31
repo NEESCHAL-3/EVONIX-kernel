@@ -315,7 +315,9 @@ static struct oplus_node nodes[] = {
 	{ "tpd_cmds", NODE_TPD_CMDS, &tpd_cmds, NULL },
 	{ "tpd_id", NODE_TPD_ID, &tpd_id, NULL },
 	{ "ux_task", NODE_UX_TASK, &sched_impt_tgid, NULL },
+	{ "ux_task_app", NODE_UX_TASK, &sched_impt_tgid, NULL },
 	{ "enable", NODE_AUDIO_ENABLE, &audio_enable, NULL },
+	{ "status", NODE_AUDIO_ENABLE, &audio_enable, NULL },
 };
 
 static int sched_impt_tgid_handler(struct ctl_table *table, int write,
