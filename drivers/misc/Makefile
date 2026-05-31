@@ -70,3 +70,4 @@ obj-$(CONFIG_TPS6594_PFSM)	+= tps6594-pfsm.o
 obj-$(CONFIG_UID_SYS_STATS)	+= uid_sys_stats.o
 obj-$(CONFIG_PKVM_SMC_FILTER)  += pkvm-smc/
 obj-$(CONFIG_OPLUS_SCHED_REAL) += oplus_sched_real.o
+obj-$(CONFIG_OPLUS_BINDER_UX_COMPAT) += oplus_binder_ux.o
