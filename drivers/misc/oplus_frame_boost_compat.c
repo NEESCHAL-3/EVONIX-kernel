@@ -30,6 +30,8 @@
 
 #define OPLUS_FB_IOCTL_MAX_RAW        0x44
 
+#define EVONIX_FRAME_BOOST_BUILD "EVONIX-OPlusFrameBoost-v12.1-ctrl-show-watermark"
+
 static DEFINE_MUTEX(fb_lock);
 
 static struct proc_dir_entry *fb_dir;
@@ -227,6 +229,7 @@ static int oplus_fb_sys_ctrl_show(struct seq_file *m, void *v)
 {
 	mutex_lock(&fb_lock);
 
+	seq_printf(m, "build=%s\n", EVONIX_FRAME_BOOST_BUILD);
 	seq_printf(m, "frame_boost_enabled=%d\n", frame_boost_enabled);
 	seq_printf(m, "sys_ctrl_write_count=%lu\n", sys_ctrl_write_count);
 	seq_printf(m, "sys_ctrl_ioctl_count=%lu\n", sys_ctrl_ioctl_count);
@@ -291,7 +294,7 @@ static int __init oplus_frame_boost_compat_init(void)
 	if (!fbg_sysctl_hdr)
 		goto err;
 
-	pr_info("oplus_frame_boost_compat: active\n");
+	pr_info("oplus_frame_boost_compat: active %s\n", EVONIX_FRAME_BOOST_BUILD);
 	return 0;
 
 err:
