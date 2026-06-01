@@ -36,6 +36,7 @@ static struct proc_dir_entry *audio_dir;
 static int sched_assist_scene;
 static int sched_impt_tgid;
 static int audio_enable;
+static int lb_enable = 1;
 static int disable_setting;
 static int im_flag;
 static int im_flag_app;
@@ -56,6 +57,7 @@ enum oplus_node_type {
 	NODE_TPD_ID,
 	NODE_UX_TASK,
 	NODE_AUDIO_ENABLE,
+	NODE_GENERIC_INT,
 };
 
 struct oplus_node {
@@ -263,6 +265,13 @@ static ssize_t oplus_write(struct file *file, const char __user *ubuf,
 			 audio_enable, buf);
 		break;
 
+	case NODE_GENERIC_INT:
+		if (node->value)
+			*node->value = first;
+		pr_debug("oplus_sched_real: %s=%ld raw=%s",
+			 node->name, (long)(node->value ? *node->value : first), buf);
+		break;
+
 	case NODE_DISABLE_SETTING:
 		if (has_first)
 			disable_setting = first;
@@ -316,6 +325,7 @@ static struct oplus_node nodes[] = {
 	{ "tpd_id", NODE_TPD_ID, &tpd_id, NULL },
 	{ "ux_task", NODE_UX_TASK, &sched_impt_tgid, NULL },
 	{ "ux_task_app", NODE_UX_TASK, &sched_impt_tgid, NULL },
+	{ "lb_enable", NODE_GENERIC_INT, &lb_enable, NULL },
 	{ "enable", NODE_AUDIO_ENABLE, &audio_enable, NULL },
 	{ "status", NODE_AUDIO_ENABLE, &audio_enable, NULL },
 };
