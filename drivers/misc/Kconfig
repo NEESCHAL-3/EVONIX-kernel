@@ -5,6 +5,14 @@
 
 menu "Misc devices"
 
+config OPLUS_GAMEOPT_ES4G_COMPAT
+	bool "OPlus GameOpt ES4G compatibility"
+	default y
+	help
+	  Creates /proc/game_opt/es4g/es4ga_ctrl and accepts ColorOS
+	  GameOpt ES4G private ioctl/write controls.
+	  
+
 config OPLUS_FRAME_BOOST_COMPAT
 	bool "OPlus frame boost compatibility"
 	default y
