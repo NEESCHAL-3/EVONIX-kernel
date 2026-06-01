@@ -39,6 +39,10 @@ static struct ctl_table_header *fbg_sysctl_hdr;
 
 static int frame_boost_enabled;
 static unsigned long ctrl_write_count;
+static unsigned long ctrl_ioctl_count;
+static unsigned int last_ctrl_ioctl_cmd;
+static unsigned int last_ctrl_ioctl_size;
+static unsigned char last_ctrl_ioctl_raw[OPLUS_FB_IOCTL_MAX_RAW];
 static unsigned long sys_ctrl_write_count;
 static unsigned long sys_ctrl_ioctl_count;
 static unsigned int last_ioctl_cmd;
@@ -111,6 +115,47 @@ static ssize_t oplus_fb_sys_ctrl_write(struct file *file,
 		 last_sys_ctrl_raw, frame_boost_enabled);
 
 	return count;
+}
+
+static long oplus_fb_ctrl_ioctl(struct file *file, unsigned int cmd,
+				 unsigned long arg)
+{
+	size_t size = 0;
+
+	switch (cmd) {
+	case OPLUS_FB_IOC_SET_FPS:
+	case OPLUS_FB_IOC_SET_SF_MSG_TRANS:
+		size = 0x30;
+		break;
+	case OPLUS_FB_IOC_CFG_APP_PARAM:
+	case OPLUS_FB_IOC_SET_SF_VAL:
+		size = 0x44;
+		break;
+	default:
+		return -ENOTTY;
+	}
+
+	mutex_lock(&fb_lock);
+
+	ctrl_ioctl_count++;
+	last_ctrl_ioctl_cmd = cmd;
+	last_ctrl_ioctl_size = size;
+	memset(last_ctrl_ioctl_raw, 0, sizeof(last_ctrl_ioctl_raw));
+
+	if (arg && copy_from_user(last_ctrl_ioctl_raw, (void __user *)arg, size)) {
+		mutex_unlock(&fb_lock);
+		return -EFAULT;
+	}
+
+	frame_boost_enabled = 1;
+	fbg_table_frame_boost_enabled = 1;
+
+	mutex_unlock(&fb_lock);
+
+	pr_debug("oplus_frame_boost_compat: ctrl ioctl cmd=0x%x size=%zu\n",
+		 cmd, size);
+
+	return 0;
 }
 
 static int oplus_fb_ctrl_show(struct seq_file *m, void *v)
@@ -208,6 +253,10 @@ static const struct proc_ops fb_ctrl_ops = {
 	.proc_open = oplus_fb_ctrl_open,
 	.proc_read = seq_read,
 	.proc_write = oplus_fb_ctrl_write,
+	.proc_ioctl = oplus_fb_ctrl_ioctl,
+#ifdef CONFIG_COMPAT
+	.proc_compat_ioctl = oplus_fb_ctrl_ioctl,
+#endif
 	.proc_lseek = seq_lseek,
 	.proc_release = single_release,
 };
