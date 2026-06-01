@@ -30,7 +30,7 @@
 
 #define OPLUS_FB_IOCTL_MAX_RAW        0x44
 
-#define EVONIX_FRAME_BOOST_BUILD "EVONIX-OPlusFrameBoost-v12.1-ctrl-show-watermark"
+#define EVONIX_FRAME_BOOST_BUILD "EVONIX-OPlusFrameBoost-v12.2-ctrl-show-fixed"
 
 static DEFINE_MUTEX(fb_lock);
 
@@ -164,63 +164,22 @@ static int oplus_fb_ctrl_show(struct seq_file *m, void *v)
 {
 	mutex_lock(&fb_lock);
 
-	seq_printf(m, "frame_boost_enabled=%d\n", frame_boost_enabled);
-	seq_printf(m, "ctrl_write_count=%lu\n", ctrl_write_count);
-	seq_printf(m, "last_ctrl_raw=%s\n", last_ctrl_raw);
+	seq_printf(m, "build=%s
+", EVONIX_FRAME_BOOST_BUILD);
+	seq_printf(m, "frame_boost_enabled=%d
+", frame_boost_enabled);
+	seq_printf(m, "ctrl_write_count=%lu
+", ctrl_write_count);
+	seq_printf(m, "ctrl_ioctl_count=%lu
+", ctrl_ioctl_count);
+	seq_printf(m, "last_ctrl_ioctl_cmd=0x%x
+", last_ctrl_ioctl_cmd);
+	seq_printf(m, "last_ctrl_ioctl_size=%u
+", last_ctrl_ioctl_size);
+	seq_printf(m, "last_ctrl_raw=%s
+", last_ctrl_raw);
 
 	mutex_unlock(&fb_lock);
-
-	return 0;
-}
-
-static long oplus_fb_sys_ctrl_ioctl(struct file *file, unsigned int cmd,
-				    unsigned long arg)
-{
-	size_t size = 0;
-
-	switch (cmd) {
-	case OPLUS_FB_IOC_SET_FPS:
-	case OPLUS_FB_IOC_SET_SF_MSG_TRANS:
-		size = 0x30;
-		break;
-	case OPLUS_FB_IOC_CFG_APP_PARAM:
-	case OPLUS_FB_IOC_SET_SF_VAL:
-		size = 0x44;
-		break;
-	default:
-		return -ENOTTY;
-	}
-
-	mutex_lock(&fb_lock);
-
-	sys_ctrl_ioctl_count++;
-	last_ioctl_cmd = cmd;
-	last_ioctl_size = size;
-	memset(last_ioctl_raw, 0, sizeof(last_ioctl_raw));
-
-	if (arg && copy_from_user(last_ioctl_raw, (void __user *)arg, size)) {
-		mutex_unlock(&fb_lock);
-		return -EFAULT;
-	}
-
-	/*
-	 * Real enough for compat stage:
-	 * ColorOS sends frame boost state through ioctl, not write().
-	 * Store/accept all known frame boost payloads so SurfaceFlinger
-	 * and SchedAssist stop treating the kernel as unsupported.
-	 */
-	if (cmd == OPLUS_FB_IOC_SET_SF_MSG_TRANS ||
-	    cmd == OPLUS_FB_IOC_SET_FPS ||
-	    cmd == OPLUS_FB_IOC_CFG_APP_PARAM ||
-	    cmd == OPLUS_FB_IOC_SET_SF_VAL) {
-		frame_boost_enabled = 1;
-		fbg_table_frame_boost_enabled = 1;
-	}
-
-	mutex_unlock(&fb_lock);
-
-	pr_debug("oplus_frame_boost_compat: ioctl cmd=0x%x size=%zu\n",
-		 cmd, size);
 
 	return 0;
 }
