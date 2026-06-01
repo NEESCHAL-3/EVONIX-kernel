@@ -76,3 +76,4 @@ obj-$(CONFIG_OPLUS_AFS_COMPAT) += oplus_afs_compat.o
 obj-$(CONFIG_OPLUS_QOS_COMPAT) += oplus_qos_compat.o
 obj-$(CONFIG_OPLUS_FRAME_BOOST_COMPAT) += oplus_frame_boost_compat.o
 obj-$(CONFIG_OPLUS_GAMEOPT_ES4G_COMPAT) += oplus_gameopt_es4g_compat.o
+obj-$(CONFIG_OPLUS_GAMEOPT_TUNE_COMPAT) += oplus_gameopt_tune_compat.o

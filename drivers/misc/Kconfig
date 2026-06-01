@@ -5,6 +5,14 @@
 
 menu "Misc devices"
 
+config OPLUS_GAMEOPT_TUNE_COMPAT
+	bool "OPlus GameOpt scheduler tuning compatibility"
+	default y
+	help
+	  Creates safe writable scheduler tuning compatibility nodes used
+	  by ColorOS GameOpt. Stage-1 stores values only.
+
+
 config OPLUS_GAMEOPT_ES4G_COMPAT
 	bool "OPlus GameOpt ES4G compatibility"
 	default y
