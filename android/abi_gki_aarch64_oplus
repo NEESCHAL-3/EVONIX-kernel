@@ -13,6 +13,7 @@
   __break_lease
   cgroup_add_legacy_cftypes
   cgroup_add_dfl_cftypes
+  cgroup_get_from_path
   config_item_init_type_name
   console_printk
   copy_fs_struct
