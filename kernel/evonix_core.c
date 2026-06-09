@@ -9,6 +9,9 @@
 #include <linux/sysfs.h>
 #include <linux/mutex.h>
 #include <linux/string.h>
+#include <linux/workqueue.h>
+#include <linux/umh.h>
+#include <linux/jiffies.h>
 
 #define EVONIX_API_VERSION	"1"
 #define EVONIX_RELEASE		"v3.0"
@@ -230,6 +233,30 @@ static const struct attribute_group evonix_attr_group = {
 	.attrs = evonix_attrs,
 };
 
+#define EVONIX_BOOT_HELPER_DELAY_SEC	30
+#define EVONIX_BOOT_HELPER_SCRIPT		"/data/evonix/bin/evonix_boot_probe.sh"
+
+static void evonix_boot_helper_work(struct work_struct *work)
+{
+	static char *argv[] = {
+		"/system/bin/sh",
+		EVONIX_BOOT_HELPER_SCRIPT,
+		NULL,
+	};
+	static char *envp[] = {
+		"HOME=/",
+		"PATH=/sbin:/system/bin:/system/xbin:/vendor/bin:/product/bin:/system_ext/bin:/odm/bin",
+		NULL,
+	};
+	int ret;
+
+	ret = call_usermodehelper(argv[0], argv, envp, UMH_NO_WAIT);
+	pr_info("EVONIX: boot helper probe requested ret=%d script=%s\n",
+		ret, EVONIX_BOOT_HELPER_SCRIPT);
+}
+
+static DECLARE_DELAYED_WORK(evonix_boot_helper_dwork, evonix_boot_helper_work);
+
 static int __init evonix_core_init(void)
 {
 	int ret;
@@ -264,6 +291,10 @@ static int __init evonix_core_init(void)
 	}
 
 	pr_info("EVONIX: core sysfs API v%s initialized\n", EVONIX_API_VERSION);
+
+	schedule_delayed_work(&evonix_boot_helper_dwork,
+		EVONIX_BOOT_HELPER_DELAY_SEC * HZ);
+
 	return 0;
 }
 
