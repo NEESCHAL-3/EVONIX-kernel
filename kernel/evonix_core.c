@@ -219,6 +219,24 @@ static struct kobj_attribute device_attr = __ATTR_RO(device);
 static struct kobj_attribute base_attr = __ATTR_RO(base);
 static struct kobj_attribute features_attr = __ATTR_RO(features);
 
+static void evonix_boot_helper_work(struct work_struct *work);
+static DECLARE_DELAYED_WORK(evonix_boot_helper_dwork, evonix_boot_helper_work);
+
+static ssize_t boot_helper_trigger_store(struct kobject *kobj,
+					 struct kobj_attribute *attr,
+					 const char *buf, size_t count)
+{
+	if (sysfs_streq(buf, "1")) {
+		pr_info("EVONIX: manual boot helper trigger requested\n");
+		schedule_delayed_work(&evonix_boot_helper_dwork, 0);
+	}
+
+	return count;
+}
+
+static struct kobj_attribute boot_helper_trigger_attr =
+	__ATTR_WO(boot_helper_trigger);
+
 static struct attribute *evonix_attrs[] = {
 	&api_version_attr.attr,
 	&release_attr.attr,
@@ -226,6 +244,7 @@ static struct attribute *evonix_attrs[] = {
 	&device_attr.attr,
 	&base_attr.attr,
 	&features_attr.attr,
+	&boot_helper_trigger_attr.attr,
 	NULL,
 };
 
@@ -250,12 +269,10 @@ static void evonix_boot_helper_work(struct work_struct *work)
 	};
 	int ret;
 
-	ret = call_usermodehelper(argv[0], argv, envp, UMH_NO_WAIT);
-	pr_info("EVONIX: boot helper probe requested ret=%d script=%s\n",
+	ret = call_usermodehelper(argv[0], argv, envp, UMH_WAIT_PROC);
+	pr_info("EVONIX: boot helper probe finished ret=%d script=%s\n",
 		ret, EVONIX_BOOT_HELPER_SCRIPT);
 }
-
-static DECLARE_DELAYED_WORK(evonix_boot_helper_dwork, evonix_boot_helper_work);
 
 static int __init evonix_core_init(void)
 {
