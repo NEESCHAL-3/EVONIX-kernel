@@ -259,7 +259,7 @@ static const struct attribute_group evonix_attr_group = {
 #define EVONIX_BOOT_HELPER_RETRY_DELAY_SEC	5
 #define EVONIX_BOOT_HELPER_MAX_RETRIES		12
 #define EVONIX_BOOT_HELPER_PATH			"/data/evonix/bin/evonixd"
-#define EVONIX_BOOT_HELPER_ARG			"start"
+#define EVONIX_BOOT_HELPER_ARG			"run"
 
 static void evonix_boot_helper_work(struct work_struct *work)
 {
@@ -278,7 +278,7 @@ static void evonix_boot_helper_work(struct work_struct *work)
 
 	evonix_boot_helper_retries++;
 
-	ret = call_usermodehelper(argv[0], argv, envp, UMH_WAIT_PROC);
+	ret = call_usermodehelper(argv[0], argv, envp, UMH_WAIT_EXEC);
 	pr_info("EVONIX: boot helper attempt=%d ret=%d path=%s arg=%s\n",
 		evonix_boot_helper_retries, ret,
 		EVONIX_BOOT_HELPER_PATH, EVONIX_BOOT_HELPER_ARG);
@@ -293,7 +293,7 @@ static void evonix_boot_helper_work(struct work_struct *work)
 		pr_err("EVONIX: boot helper failed after %d attempts ret=%d\n",
 		       evonix_boot_helper_retries, ret);
 	else
-		pr_info("EVONIX: boot helper started evonixd successfully\n");
+		pr_info("EVONIX: boot helper requested evonixd run successfully\n");
 }
 
 static int __init evonix_core_init(void)
