@@ -63,6 +63,7 @@ static ssize_t features_show(struct kobject *kobj,
 	return sysfs_emit(buf,
 			  "identity=1\n"
 			  "charging_api=1\n"
+			  "boot_helper=1\n"
 			  "charge_limit=api_only\n"
 			  "watt_mode=api_only\n"
 			  "bypass=0\n"
@@ -221,6 +222,7 @@ static struct kobj_attribute features_attr = __ATTR_RO(features);
 
 static void evonix_boot_helper_work(struct work_struct *work);
 static DECLARE_DELAYED_WORK(evonix_boot_helper_dwork, evonix_boot_helper_work);
+static int evonix_boot_helper_retries;
 
 static ssize_t boot_helper_trigger_store(struct kobject *kobj,
 					 struct kobj_attribute *attr,
@@ -228,6 +230,7 @@ static ssize_t boot_helper_trigger_store(struct kobject *kobj,
 {
 	if (sysfs_streq(buf, "1")) {
 		pr_info("EVONIX: manual boot helper trigger requested\n");
+		evonix_boot_helper_retries = 0;
 		schedule_delayed_work(&evonix_boot_helper_dwork, 0);
 	}
 
@@ -252,14 +255,18 @@ static const struct attribute_group evonix_attr_group = {
 	.attrs = evonix_attrs,
 };
 
-#define EVONIX_BOOT_HELPER_DELAY_SEC	30
-#define EVONIX_BOOT_HELPER_SCRIPT		"/data/evonix/bin/evonix_boot_probe.sh"
+#define EVONIX_BOOT_HELPER_FIRST_DELAY_SEC	5
+#define EVONIX_BOOT_HELPER_RETRY_DELAY_SEC	5
+#define EVONIX_BOOT_HELPER_MAX_RETRIES		12
+#define EVONIX_BOOT_HELPER_PATH			"/data/evonix/bin/evonixd"
+#define EVONIX_BOOT_HELPER_ARG			"start"
 
 static void evonix_boot_helper_work(struct work_struct *work)
 {
 	static char *argv[] = {
 		"/system/bin/sh",
-		EVONIX_BOOT_HELPER_SCRIPT,
+		EVONIX_BOOT_HELPER_PATH,
+		EVONIX_BOOT_HELPER_ARG,
 		NULL,
 	};
 	static char *envp[] = {
@@ -269,9 +276,24 @@ static void evonix_boot_helper_work(struct work_struct *work)
 	};
 	int ret;
 
+	evonix_boot_helper_retries++;
+
 	ret = call_usermodehelper(argv[0], argv, envp, UMH_WAIT_PROC);
-	pr_info("EVONIX: boot helper probe finished ret=%d script=%s\n",
-		ret, EVONIX_BOOT_HELPER_SCRIPT);
+	pr_info("EVONIX: boot helper attempt=%d ret=%d path=%s arg=%s\n",
+		evonix_boot_helper_retries, ret,
+		EVONIX_BOOT_HELPER_PATH, EVONIX_BOOT_HELPER_ARG);
+
+	if (ret && evonix_boot_helper_retries < EVONIX_BOOT_HELPER_MAX_RETRIES) {
+		schedule_delayed_work(&evonix_boot_helper_dwork,
+			EVONIX_BOOT_HELPER_RETRY_DELAY_SEC * HZ);
+		return;
+	}
+
+	if (ret)
+		pr_err("EVONIX: boot helper failed after %d attempts ret=%d\n",
+		       evonix_boot_helper_retries, ret);
+	else
+		pr_info("EVONIX: boot helper started evonixd successfully\n");
 }
 
 static int __init evonix_core_init(void)
@@ -310,7 +332,7 @@ static int __init evonix_core_init(void)
 	pr_info("EVONIX: core sysfs API v%s initialized\n", EVONIX_API_VERSION);
 
 	schedule_delayed_work(&evonix_boot_helper_dwork,
-		EVONIX_BOOT_HELPER_DELAY_SEC * HZ);
+		EVONIX_BOOT_HELPER_FIRST_DELAY_SEC * HZ);
 
 	return 0;
 }
