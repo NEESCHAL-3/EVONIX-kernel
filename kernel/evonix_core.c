@@ -21,7 +21,7 @@ static struct kobject *evonix_charging_kobj;
 
 static DEFINE_MUTEX(evonix_charging_lock);
 static int evonix_limit_enabled;
-static int evonix_limit_percent = 80;
+static int evonix_limit_percent = 100;
 static char evonix_watt_mode[16] = "dynamic";
 
 static ssize_t api_version_show(struct kobject *kobj,
