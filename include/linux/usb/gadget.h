@@ -98,7 +98,6 @@ struct usb_ep;
  */
 
 struct usb_request {
-	struct usb_ep		*ep;
 	void			*buf;
 	unsigned		length;
 	dma_addr_t		dma;
@@ -124,7 +123,7 @@ struct usb_request {
 	int			status;
 	unsigned		actual;
 
-	ANDROID_KABI_RESERVE(1);
+	ANDROID_KABI_USE(1, struct usb_ep *ep);
 };
 
 /*-------------------------------------------------------------------------*/
