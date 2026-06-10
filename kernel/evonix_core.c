@@ -12,6 +12,8 @@
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
 #include <linux/uaccess.h>
+#include <linux/miscdevice.h>
+#include <linux/fs.h>
 
 #define EVONIX_API_VERSION	"1"
 #define EVONIX_RELEASE		"v3.0"
@@ -236,7 +238,9 @@ static const struct attribute_group evonix_attr_group = {
 
 #define EVONIX_CTL_MAX_CMD	64
 
-static int evonix_ctl_show(struct seq_file *m, void *v)
+static bool evonix_valid_watt_mode(const char *mode);
+
+static int evonix_ctl_format_status(char *buf, size_t size)
 {
 	int enabled;
 	int percent;
@@ -248,36 +252,21 @@ static int evonix_ctl_show(struct seq_file *m, void *v)
 	strscpy(watt, evonix_watt_mode, sizeof(watt));
 	mutex_unlock(&evonix_charging_lock);
 
-	seq_puts(m, "EVONIX control v1\n");
-	seq_printf(m, "api=%s\n", EVONIX_API_VERSION);
-	seq_printf(m, "limit_enabled=%d\n", enabled);
-	seq_printf(m, "limit_percent=%d\n", percent);
-	seq_printf(m, "watt_mode=%s\n", watt);
-	seq_puts(m, "commands:\n");
-	seq_puts(m, "  limit_enabled=0|1\n");
-	seq_puts(m, "  limit_percent=1..100\n");
-	seq_puts(m, "  watt_mode=dynamic|33w|45w|65w|90w\n");
-	seq_puts(m, "  reset\n");
-
-	return 0;
+	return scnprintf(buf, size,
+		"EVONIX control v1\n"
+		"api=%s\n"
+		"limit_enabled=%d\n"
+		"limit_percent=%d\n"
+		"watt_mode=%s\n"
+		"commands:\n"
+		"  limit_enabled=0|1\n"
+		"  limit_percent=1..100\n"
+		"  watt_mode=dynamic|33w|45w|65w|90w\n"
+		"  reset\n",
+		EVONIX_API_VERSION, enabled, percent, watt);
 }
 
-static int evonix_ctl_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, evonix_ctl_show, NULL);
-}
-
-static bool evonix_valid_watt_mode(const char *mode)
-{
-	return sysfs_streq(mode, "dynamic") ||
-	       sysfs_streq(mode, "33w") ||
-	       sysfs_streq(mode, "45w") ||
-	       sysfs_streq(mode, "65w") ||
-	       sysfs_streq(mode, "90w");
-}
-
-static ssize_t evonix_ctl_write(struct file *file, const char __user *ubuf,
-				size_t count, loff_t *ppos)
+static ssize_t evonix_ctl_apply_command(const char *input, size_t count)
 {
 	char cmd[EVONIX_CTL_MAX_CMD];
 	char *val;
@@ -290,10 +279,7 @@ static ssize_t evonix_ctl_write(struct file *file, const char __user *ubuf,
 	if (count >= sizeof(cmd))
 		return -EINVAL;
 
-	if (copy_from_user(cmd, ubuf, count))
-		return -EFAULT;
-
-	cmd[count] = '\0';
+	strscpy(cmd, input, sizeof(cmd));
 	strim(cmd);
 
 	if (!strcmp(cmd, "reset")) {
@@ -362,12 +348,99 @@ static ssize_t evonix_ctl_write(struct file *file, const char __user *ubuf,
 	return -EINVAL;
 }
 
+static int evonix_ctl_show(struct seq_file *m, void *v)
+{
+	char buf[512];
+
+	evonix_ctl_format_status(buf, sizeof(buf));
+	seq_puts(m, buf);
+
+	return 0;
+}
+
+static int evonix_ctl_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, evonix_ctl_show, NULL);
+}
+
+static bool evonix_valid_watt_mode(const char *mode)
+{
+	return sysfs_streq(mode, "dynamic") ||
+	       sysfs_streq(mode, "33w") ||
+	       sysfs_streq(mode, "45w") ||
+	       sysfs_streq(mode, "65w") ||
+	       sysfs_streq(mode, "90w");
+}
+
+static ssize_t evonix_ctl_write(struct file *file, const char __user *ubuf,
+				size_t count, loff_t *ppos)
+{
+	char cmd[EVONIX_CTL_MAX_CMD];
+
+	if (!count)
+		return 0;
+
+	if (count >= sizeof(cmd))
+		return -EINVAL;
+
+	if (copy_from_user(cmd, ubuf, count))
+		return -EFAULT;
+
+	cmd[count] = '\0';
+
+	return evonix_ctl_apply_command(cmd, count);
+}
+
 static const struct proc_ops evonix_ctl_proc_ops = {
 	.proc_open = evonix_ctl_open,
 	.proc_read = seq_read,
 	.proc_write = evonix_ctl_write,
 	.proc_lseek = seq_lseek,
 	.proc_release = single_release,
+};
+
+static ssize_t evonix_dev_read(struct file *file, char __user *ubuf,
+			       size_t count, loff_t *ppos)
+{
+	char buf[512];
+	int len;
+
+	len = evonix_ctl_format_status(buf, sizeof(buf));
+
+	return simple_read_from_buffer(ubuf, count, ppos, buf, len);
+}
+
+static ssize_t evonix_dev_write(struct file *file, const char __user *ubuf,
+				size_t count, loff_t *ppos)
+{
+	char cmd[EVONIX_CTL_MAX_CMD];
+
+	if (!count)
+		return 0;
+
+	if (count >= sizeof(cmd))
+		return -EINVAL;
+
+	if (copy_from_user(cmd, ubuf, count))
+		return -EFAULT;
+
+	cmd[count] = '\0';
+
+	return evonix_ctl_apply_command(cmd, count);
+}
+
+static const struct file_operations evonix_dev_fops = {
+	.owner = THIS_MODULE,
+	.read = evonix_dev_read,
+	.write = evonix_dev_write,
+	.llseek = no_llseek,
+};
+
+static struct miscdevice evonix_miscdev = {
+	.minor = MISC_DYNAMIC_MINOR,
+	.name = "evonix_ctl",
+	.fops = &evonix_dev_fops,
+	.mode = 0666,
 };
 
 static int __init evonix_core_init(void)
@@ -409,6 +482,12 @@ static int __init evonix_core_init(void)
 		pr_warn("EVONIX: failed to create /proc/evonix_ctl\n");
 	else
 		pr_info("EVONIX: /proc/evonix_ctl created\n");
+
+	ret = misc_register(&evonix_miscdev);
+	if (ret)
+		pr_warn("EVONIX: failed to register /dev/evonix_ctl ret=%d\n", ret);
+	else
+		pr_info("EVONIX: /dev/evonix_ctl registered\n");
 
 	pr_info("EVONIX: core sysfs API v%s initialized\n", EVONIX_API_VERSION);
 	return 0;
