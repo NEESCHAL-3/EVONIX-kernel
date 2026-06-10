@@ -9,6 +9,9 @@
 #include <linux/sysfs.h>
 #include <linux/mutex.h>
 #include <linux/string.h>
+#include <linux/proc_fs.h>
+#include <linux/seq_file.h>
+#include <linux/uaccess.h>
 
 #define EVONIX_API_VERSION	"1"
 #define EVONIX_RELEASE		"v3.0"
@@ -18,6 +21,7 @@
 
 static struct kobject *evonix_kobj;
 static struct kobject *evonix_charging_kobj;
+static struct proc_dir_entry *evonix_ctl_proc;
 
 static DEFINE_MUTEX(evonix_charging_lock);
 static int evonix_limit_enabled;
@@ -230,6 +234,142 @@ static const struct attribute_group evonix_attr_group = {
 	.attrs = evonix_attrs,
 };
 
+#define EVONIX_CTL_MAX_CMD	64
+
+static int evonix_ctl_show(struct seq_file *m, void *v)
+{
+	int enabled;
+	int percent;
+	char watt[sizeof(evonix_watt_mode)];
+
+	mutex_lock(&evonix_charging_lock);
+	enabled = evonix_limit_enabled;
+	percent = evonix_limit_percent;
+	strscpy(watt, evonix_watt_mode, sizeof(watt));
+	mutex_unlock(&evonix_charging_lock);
+
+	seq_puts(m, "EVONIX control v1\n");
+	seq_printf(m, "api=%s\n", EVONIX_API_VERSION);
+	seq_printf(m, "limit_enabled=%d\n", enabled);
+	seq_printf(m, "limit_percent=%d\n", percent);
+	seq_printf(m, "watt_mode=%s\n", watt);
+	seq_puts(m, "commands:\n");
+	seq_puts(m, "  limit_enabled=0|1\n");
+	seq_puts(m, "  limit_percent=1..100\n");
+	seq_puts(m, "  watt_mode=dynamic|33w|45w|65w|90w\n");
+	seq_puts(m, "  reset\n");
+
+	return 0;
+}
+
+static int evonix_ctl_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, evonix_ctl_show, NULL);
+}
+
+static bool evonix_valid_watt_mode(const char *mode)
+{
+	return sysfs_streq(mode, "dynamic") ||
+	       sysfs_streq(mode, "33w") ||
+	       sysfs_streq(mode, "45w") ||
+	       sysfs_streq(mode, "65w") ||
+	       sysfs_streq(mode, "90w");
+}
+
+static ssize_t evonix_ctl_write(struct file *file, const char __user *ubuf,
+				size_t count, loff_t *ppos)
+{
+	char cmd[EVONIX_CTL_MAX_CMD];
+	char *val;
+	int ret;
+	int tmp;
+
+	if (!count)
+		return 0;
+
+	if (count >= sizeof(cmd))
+		return -EINVAL;
+
+	if (copy_from_user(cmd, ubuf, count))
+		return -EFAULT;
+
+	cmd[count] = '\0';
+	strim(cmd);
+
+	if (!strcmp(cmd, "reset")) {
+		mutex_lock(&evonix_charging_lock);
+		evonix_limit_enabled = 0;
+		evonix_limit_percent = 100;
+		strscpy(evonix_watt_mode, "dynamic", sizeof(evonix_watt_mode));
+		mutex_unlock(&evonix_charging_lock);
+
+		pr_info("EVONIX: ctl reset\n");
+		return count;
+	}
+
+	val = strchr(cmd, '=');
+	if (!val)
+		return -EINVAL;
+
+	*val++ = '\0';
+	strim(cmd);
+	strim(val);
+
+	if (!strcmp(cmd, "limit_enabled")) {
+		ret = kstrtoint(val, 10, &tmp);
+		if (ret)
+			return ret;
+
+		if (tmp != 0 && tmp != 1)
+			return -EINVAL;
+
+		mutex_lock(&evonix_charging_lock);
+		evonix_limit_enabled = tmp;
+		mutex_unlock(&evonix_charging_lock);
+
+		pr_info("EVONIX: ctl limit_enabled=%d\n", tmp);
+		return count;
+	}
+
+	if (!strcmp(cmd, "limit_percent")) {
+		ret = kstrtoint(val, 10, &tmp);
+		if (ret)
+			return ret;
+
+		if (tmp < 1 || tmp > 100)
+			return -EINVAL;
+
+		mutex_lock(&evonix_charging_lock);
+		evonix_limit_percent = tmp;
+		mutex_unlock(&evonix_charging_lock);
+
+		pr_info("EVONIX: ctl limit_percent=%d\n", tmp);
+		return count;
+	}
+
+	if (!strcmp(cmd, "watt_mode")) {
+		if (!evonix_valid_watt_mode(val))
+			return -EINVAL;
+
+		mutex_lock(&evonix_charging_lock);
+		strscpy(evonix_watt_mode, val, sizeof(evonix_watt_mode));
+		mutex_unlock(&evonix_charging_lock);
+
+		pr_info("EVONIX: ctl watt_mode=%s\n", val);
+		return count;
+	}
+
+	return -EINVAL;
+}
+
+static const struct proc_ops evonix_ctl_proc_ops = {
+	.proc_open = evonix_ctl_open,
+	.proc_read = seq_read,
+	.proc_write = evonix_ctl_write,
+	.proc_lseek = seq_lseek,
+	.proc_release = single_release,
+};
+
 static int __init evonix_core_init(void)
 {
 	int ret;
@@ -262,6 +402,13 @@ static int __init evonix_core_init(void)
 		evonix_kobj = NULL;
 		return ret;
 	}
+
+	evonix_ctl_proc = proc_create("evonix_ctl", 0666, NULL,
+		&evonix_ctl_proc_ops);
+	if (!evonix_ctl_proc)
+		pr_warn("EVONIX: failed to create /proc/evonix_ctl\n");
+	else
+		pr_info("EVONIX: /proc/evonix_ctl created\n");
 
 	pr_info("EVONIX: core sysfs API v%s initialized\n", EVONIX_API_VERSION);
 	return 0;
