@@ -222,6 +222,24 @@ static int evx_get_shell_temp_mc(void)
 }
 
 /* /sys/class/oplus_chg/battery/chip_soc */
+static ssize_t gauge_car_c_show(struct device *dev,
+				      struct device_attribute *attr, char *buf)
+{
+	int mah;
+
+	/*
+	 * Real-backed OPlus gauge_car_c:
+	 * use the same battery/BMS charge counter backend as battery_rm.
+	 */
+	mah = evx_get_battery_rm_mah();
+	if (mah < 0)
+		return mah;
+
+	return sysfs_emit(buf, "%d\n", mah);
+}
+
+static DEVICE_ATTR_RO(gauge_car_c);
+
 static ssize_t chip_soc_show(struct device *dev,
 			     struct device_attribute *attr, char *buf)
 {
@@ -372,6 +390,10 @@ static int __init evx_cos_power_compat_init(void)
 		goto err_usb_dev;
 
 	ret = device_create_file(oplus_battery_dev, &dev_attr_battery_rm);
+	ret = device_create_file(oplus_battery_dev, &dev_attr_gauge_car_c);
+	if (ret && ret != -EEXIST)
+		pr_warn(EVX_NAME ": gauge_car_c create failed: %d\n", ret);
+
 	if (ret)
 		goto err_remove_chip_soc;
 
@@ -416,7 +438,8 @@ err_remove_fast_chg_type:
 err_remove_charge_technology:
 	device_remove_file(oplus_battery_dev, &dev_attr_charge_technology);
 err_remove_battery_rm:
-	device_remove_file(oplus_battery_dev, &dev_attr_battery_rm);
+		device_remove_file(oplus_battery_dev, &dev_attr_gauge_car_c);
+device_remove_file(oplus_battery_dev, &dev_attr_battery_rm);
 err_remove_chip_soc:
 	device_remove_file(oplus_battery_dev, &dev_attr_chip_soc);
 err_usb_dev:

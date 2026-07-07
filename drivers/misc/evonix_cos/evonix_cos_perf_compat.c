@@ -39,6 +39,8 @@ static struct proc_dir_entry *proc_oplus_scheduler_dir;
 static struct proc_dir_entry *proc_sched_assist_dir;
 static struct proc_dir_entry *proc_sched_assist_scene;
 static struct proc_dir_entry *proc_sched_assist_im_flag;
+static struct proc_dir_entry *proc_sched_assist_debug_enabled;
+static struct proc_dir_entry *proc_sched_assist_lb_enable;
 static struct proc_dir_entry *proc_theia_pwk_report;
 static struct proc_dir_entry *proc_swpm_dir;
 static struct proc_dir_entry *proc_swpm_sp_ddr_idx;
@@ -53,6 +55,8 @@ static struct proc_dir_entry *proc_ufs_total_write_size_mb;
 
 static atomic_t sched_assist_scene = ATOMIC_INIT(0);
 static atomic_t sched_assist_im_flag = ATOMIC_INIT(0);
+static atomic_t sched_assist_debug_enabled = ATOMIC_INIT(0);
+static atomic_t sched_assist_lb_enable = ATOMIC_INIT(1);
 static atomic64_t theia_pwk_report_count;
 static char theia_pwk_last_payload[128];
 static atomic_t oplus_eng_version = ATOMIC_INIT(0);
@@ -352,6 +356,86 @@ static const struct proc_ops sched_assist_im_flag_proc_ops = {
 	.proc_release	= single_release,
 };
 
+static int sched_assist_debug_enabled_proc_show(struct seq_file *m, void *v)
+{
+	seq_printf(m, "%d\n", atomic_read(&sched_assist_debug_enabled));
+	return 0;
+}
+
+static int sched_assist_debug_enabled_proc_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, sched_assist_debug_enabled_proc_show, NULL);
+}
+
+static ssize_t sched_assist_debug_enabled_proc_write(struct file *file,
+						     const char __user *buf,
+						     size_t count, loff_t *ppos)
+{
+	char kbuf[32];
+	int val;
+
+	if (count >= sizeof(kbuf))
+		count = sizeof(kbuf) - 1;
+
+	if (copy_from_user(kbuf, buf, count))
+		return -EFAULT;
+
+	kbuf[count] = '\0';
+
+	if (!kstrtoint(kbuf, 0, &val))
+		atomic_set(&sched_assist_debug_enabled, val);
+
+	return count;
+}
+
+static const struct proc_ops sched_assist_debug_enabled_proc_ops = {
+	.proc_open	= sched_assist_debug_enabled_proc_open,
+	.proc_read	= seq_read,
+	.proc_write	= sched_assist_debug_enabled_proc_write,
+	.proc_lseek	= seq_lseek,
+	.proc_release	= single_release,
+};
+
+static int sched_assist_lb_enable_proc_show(struct seq_file *m, void *v)
+{
+	seq_printf(m, "%d\n", atomic_read(&sched_assist_lb_enable));
+	return 0;
+}
+
+static int sched_assist_lb_enable_proc_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, sched_assist_lb_enable_proc_show, NULL);
+}
+
+static ssize_t sched_assist_lb_enable_proc_write(struct file *file,
+						 const char __user *buf,
+						 size_t count, loff_t *ppos)
+{
+	char kbuf[32];
+	int val;
+
+	if (count >= sizeof(kbuf))
+		count = sizeof(kbuf) - 1;
+
+	if (copy_from_user(kbuf, buf, count))
+		return -EFAULT;
+
+	kbuf[count] = '\0';
+
+	if (!kstrtoint(kbuf, 0, &val))
+		atomic_set(&sched_assist_lb_enable, val);
+
+	return count;
+}
+
+static const struct proc_ops sched_assist_lb_enable_proc_ops = {
+	.proc_open	= sched_assist_lb_enable_proc_open,
+	.proc_read	= seq_read,
+	.proc_write	= sched_assist_lb_enable_proc_write,
+	.proc_lseek	= seq_lseek,
+	.proc_release	= single_release,
+};
+
 static int theia_pwk_report_proc_show(struct seq_file *m, void *v)
 {
 	seq_printf(m, "count=%lld\n",
@@ -612,6 +696,14 @@ static int __init evx_cos_perf_compat_init(void)
 				proc_create("im_flag", 0666,
 					    proc_sched_assist_dir,
 					    &sched_assist_im_flag_proc_ops);
+			proc_sched_assist_debug_enabled =
+				proc_create("debug_enabled", 0666,
+					    proc_sched_assist_dir,
+					    &sched_assist_debug_enabled_proc_ops);
+			proc_sched_assist_lb_enable =
+				proc_create("lb_enable", 0666,
+					    proc_sched_assist_dir,
+					    &sched_assist_lb_enable_proc_ops);
 		}
 	}
 
@@ -640,6 +732,10 @@ static void __exit evx_cos_perf_compat_exit(void)
 		proc_remove(proc_swpm_sp_ddr_idx);
 	if (proc_swpm_dir)
 		proc_remove(proc_swpm_dir);
+	if (proc_sched_assist_lb_enable)
+		proc_remove(proc_sched_assist_lb_enable);
+	if (proc_sched_assist_debug_enabled)
+		proc_remove(proc_sched_assist_debug_enabled);
 	if (proc_sched_assist_im_flag)
 		proc_remove(proc_sched_assist_im_flag);
 
