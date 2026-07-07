@@ -3468,6 +3468,7 @@ static int f2fs_ioc_set_pin_file(struct file *filp, unsigned long arg)
 	struct f2fs_sb_info *sbi = F2FS_I_SB(inode);
 	__u32 pin;
 	int ret = 0;
+	bool allow_pin_big_file = false;
 
 	if (get_user(pin, (__u32 __user *)arg))
 		return -EFAULT;
@@ -3500,7 +3501,9 @@ static int f2fs_ioc_set_pin_file(struct file *filp, unsigned long arg)
 		goto done;
 	}
 
-	if (F2FS_HAS_BLOCKS(inode)) {
+	trace_android_vh_f2fs_ioc_set_pin_file(inode, f2fs_sb_has_blkzoned(sbi),
+						&allow_pin_big_file);
+	if (!allow_pin_big_file && F2FS_HAS_BLOCKS(inode)) {
 		ret = -EFBIG;
 		goto out;
 	}

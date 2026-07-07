@@ -5,12 +5,12 @@ optimize kernel builds, improving performance for specific architectures and ker
 
 ## kernel.afdo
 
-The AutoFDO profile (kernel.afdo) for vmlinux is collected on kernel version 6.6.123 (
-SHA 276ca917d82bbadd5904c10e4073f9955cd8893d, build server ID 14925724) using Pixel 10.
+The AutoFDO profile (kernel.afdo) for vmlinux is collected on kernel version 6.6.129 (
+SHA 11444f5f7cd158c7f2a7a8ee271f22973eb3e9f1, build server ID 15398938) using Pixel 10.
 
 ## Performance improvements
 
-The metrics below reflect the latest benchmark evaluations gathered using the 6.6.123 profile on
+The metrics below reflect the latest benchmark evaluations gathered using the 6.6.129 profile on
 Pixel 8. While a successful profile is defined by positive improvements across most benchmarks,
 results may fluctuate between updates. These variances can be driven by kernel and userspace code
 changes, the sampled nature of AutoFDO profiles, testing hardware differences, and inherent
@@ -18,11 +18,11 @@ benchmark noise.
 
 | Benchmark            | Improvement |
 | -------------------- | ----------- |
-| Boot time            | 1.5%        |
-| Cold App launch time | 3.0%        |
-| Binder-rpc           | 19.5%       |
-| Binder-addints       | 37.7%       |
-| Hwbinder             | 11.7%       |
+| Boot time            | 1.7%        |
+| Cold App launch time | 2.9%        |
+| Binder-rpc           | 17%         |
+| Binder-addints       | 15.5%       |
+| Hwbinder             | 18.9%       |
 
 Other improvements tested on past profiles:
 

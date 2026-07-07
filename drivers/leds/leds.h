@@ -32,5 +32,6 @@ extern struct rw_semaphore leds_list_lock;
 extern struct list_head leds_list;
 extern struct list_head trigger_list;
 extern const char * const led_colors[LED_COLOR_ID_MAX];
+extern struct workqueue_struct *leds_wq;
 
 #endif	/* __LEDS_H_INCLUDED */

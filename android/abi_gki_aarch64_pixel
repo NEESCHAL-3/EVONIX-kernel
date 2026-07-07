@@ -1138,6 +1138,7 @@
   get_user_pages
   get_user_pages_fast
   get_vaddr_frames
+  get_zeroed_page
   glob_match
   gov_attr_set_get
   gov_attr_set_init
@@ -3251,6 +3252,7 @@
   vmf_insert_pfn
   vmf_insert_pfn_prot
   vm_get_page_prot
+  vm_insert_page
   vm_iomap_memory
   vm_map_ram
   vm_node_stat

@@ -13,6 +13,7 @@
 
 #else	/* !CONFIG_MEMORY_RELINQUISH */
 
+static inline bool page_relinquish_disallowed(void) { return false; }
 static inline void page_relinquish(struct page *page) { }
 static inline void post_page_relinquish_tlb_inv(void) { }
 
