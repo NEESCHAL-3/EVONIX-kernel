@@ -7,6 +7,8 @@
  * Copyright (c) 2017 Chao Yu <chao@kernel.org>
  */
 #include <linux/compiler.h>
+#include <linux/uidgid.h>
+#include <linux/user_namespace.h>
 #include <linux/proc_fs.h>
 #include <linux/f2fs_fs.h>
 #include <linux/seq_file.h>
@@ -1545,7 +1547,19 @@ static const struct sysfs_ops f2fs_attr_ops = {
 	.store	= f2fs_attr_store,
 };
 
+static void f2fs_sysfs_get_ownership(const struct kobject *kobj,
+					    kuid_t *uid, kgid_t *gid)
+{
+	/*
+	 * ColorOS system_server writes selected F2FS tuning nodes.
+	 * Keep owner root, but make group system so 0664 attrs are writable.
+	 */
+	*uid = GLOBAL_ROOT_UID;
+	*gid = make_kgid(&init_user_ns, 1000);
+}
+
 static const struct kobj_type f2fs_sb_ktype = {
+	.get_ownership	= f2fs_sysfs_get_ownership,
 	.default_groups = f2fs_groups,
 	.sysfs_ops	= &f2fs_attr_ops,
 	.release	= f2fs_sb_release,

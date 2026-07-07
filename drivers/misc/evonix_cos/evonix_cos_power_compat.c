@@ -26,6 +26,8 @@
 static struct class *oplus_chg_class;
 static struct device *oplus_battery_dev;
 static struct device *oplus_usb_dev;
+static struct power_supply *evx_ac_psy;
+static struct power_supply *evx_pc_port_psy;
 
 static struct proc_dir_entry *proc_charger_dir;
 static struct proc_dir_entry *proc_input_current_now;
@@ -221,6 +223,79 @@ static int evx_get_shell_temp_mc(void)
 	return -ENODEV;
 }
 
+static enum power_supply_property evx_online_props[] = {
+	POWER_SUPPLY_PROP_ONLINE,
+};
+
+static int evx_supply_online_get_property(struct power_supply *psy,
+					  enum power_supply_property psp,
+					  union power_supply_propval *val)
+{
+	int online = 0;
+	int ret;
+
+	if (psp != POWER_SUPPLY_PROP_ONLINE)
+		return -EINVAL;
+
+	ret = evx_psy_get_int("usb", POWER_SUPPLY_PROP_ONLINE, &online);
+	if (ret < 0)
+		ret = evx_psy_get_int("primary_chg", POWER_SUPPLY_PROP_ONLINE, &online);
+	if (ret < 0)
+		online = 0;
+
+	val->intval = online > 0 ? 1 : 0;
+	return 0;
+}
+
+static const struct power_supply_desc evx_ac_power_supply_desc = {
+	.name		= "ac",
+	.type		= POWER_SUPPLY_TYPE_MAINS,
+	.properties	= evx_online_props,
+	.num_properties	= ARRAY_SIZE(evx_online_props),
+	.get_property	= evx_supply_online_get_property,
+};
+
+static const struct power_supply_desc evx_pc_port_power_supply_desc = {
+	.name		= "pc_port",
+	.type		= POWER_SUPPLY_TYPE_USB,
+	.properties	= evx_online_props,
+	.num_properties	= ARRAY_SIZE(evx_online_props),
+	.get_property	= evx_supply_online_get_property,
+};
+
+static void evx_register_power_supply_aliases(void)
+{
+	struct power_supply_config cfg = {};
+
+	evx_ac_psy = power_supply_register(NULL, &evx_ac_power_supply_desc, &cfg);
+	if (IS_ERR(evx_ac_psy)) {
+		pr_warn(EVX_NAME ": ac power_supply alias failed: %ld\n",
+			PTR_ERR(evx_ac_psy));
+		evx_ac_psy = NULL;
+	}
+
+	evx_pc_port_psy =
+		power_supply_register(NULL, &evx_pc_port_power_supply_desc, &cfg);
+	if (IS_ERR(evx_pc_port_psy)) {
+		pr_warn(EVX_NAME ": pc_port power_supply alias failed: %ld\n",
+			PTR_ERR(evx_pc_port_psy));
+		evx_pc_port_psy = NULL;
+	}
+}
+
+static void evx_unregister_power_supply_aliases(void)
+{
+	if (evx_pc_port_psy) {
+		power_supply_unregister(evx_pc_port_psy);
+		evx_pc_port_psy = NULL;
+	}
+
+	if (evx_ac_psy) {
+		power_supply_unregister(evx_ac_psy);
+		evx_ac_psy = NULL;
+	}
+}
+
 /* /sys/class/oplus_chg/battery/chip_soc */
 static ssize_t gauge_car_c_show(struct device *dev,
 				      struct device_attribute *attr, char *buf)
@@ -362,6 +437,8 @@ static int __init evx_cos_power_compat_init(void)
 {
 	int ret;
 
+	evx_register_power_supply_aliases();
+
 	oplus_chg_class = class_create("oplus_chg");
 	if (IS_ERR(oplus_chg_class)) {
 		pr_err(EVX_NAME ": failed to create oplus_chg class: %ld\n",
@@ -438,8 +515,8 @@ err_remove_fast_chg_type:
 err_remove_charge_technology:
 	device_remove_file(oplus_battery_dev, &dev_attr_charge_technology);
 err_remove_battery_rm:
-		device_remove_file(oplus_battery_dev, &dev_attr_gauge_car_c);
-device_remove_file(oplus_battery_dev, &dev_attr_battery_rm);
+	device_remove_file(oplus_battery_dev, &dev_attr_gauge_car_c);
+	device_remove_file(oplus_battery_dev, &dev_attr_battery_rm);
 err_remove_chip_soc:
 	device_remove_file(oplus_battery_dev, &dev_attr_chip_soc);
 err_usb_dev:
@@ -453,6 +530,7 @@ err_class:
 
 static void __exit evx_cos_power_compat_exit(void)
 {
+	evx_unregister_power_supply_aliases();
 	if (proc_shell_temp)
 		proc_remove(proc_shell_temp);
 	if (proc_input_current_now)

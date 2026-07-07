@@ -35,6 +35,8 @@ static u64 watchdog_last_kick_ns;
 static char watchdog_last_payload[64];
 
 static struct device *evx_ufs_dev;
+static struct proc_dir_entry *proc_oplus_binder_dir;
+static struct proc_dir_entry *proc_oplus_binder_ux_flag;
 static struct proc_dir_entry *proc_oplus_scheduler_dir;
 static struct proc_dir_entry *proc_sched_assist_dir;
 static struct proc_dir_entry *proc_sched_assist_scene;
@@ -53,6 +55,9 @@ static struct proc_dir_entry *proc_io_metrics_forever_dir;
 static struct proc_dir_entry *proc_ufs_total_read_size_mb;
 static struct proc_dir_entry *proc_ufs_total_write_size_mb;
 
+static atomic_t oplus_binder_ux_flag = ATOMIC_INIT(0);
+static atomic64_t oplus_binder_ux_ioctl_count;
+static unsigned int oplus_binder_ux_last_cmd;
 static atomic_t sched_assist_scene = ATOMIC_INIT(0);
 static atomic_t sched_assist_im_flag = ATOMIC_INIT(0);
 static atomic_t sched_assist_debug_enabled = ATOMIC_INIT(0);
@@ -136,6 +141,65 @@ static DEVICE_ATTR_RW(virtualtlcbuff);
  * This stores the real scene written/read by userspace. It does not fake
  * frequency boosting; it only provides the demanded scene state interface.
  */
+static int oplus_binder_ux_flag_proc_show(struct seq_file *m, void *v)
+{
+	seq_printf(m, "%d\n", atomic_read(&oplus_binder_ux_flag));
+	seq_printf(m, "ioctl_count=%lld\n",
+		   (long long)atomic64_read(&oplus_binder_ux_ioctl_count));
+	seq_printf(m, "last_cmd=%u\n", oplus_binder_ux_last_cmd);
+	return 0;
+}
+
+static int oplus_binder_ux_flag_proc_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, oplus_binder_ux_flag_proc_show, NULL);
+}
+
+static ssize_t oplus_binder_ux_flag_proc_write(struct file *file,
+					       const char __user *buf,
+					       size_t count, loff_t *ppos)
+{
+	char kbuf[32];
+	int val;
+
+	if (count >= sizeof(kbuf))
+		count = sizeof(kbuf) - 1;
+
+	if (copy_from_user(kbuf, buf, count))
+		return -EFAULT;
+
+	kbuf[count] = '\0';
+
+	if (!kstrtoint(kbuf, 0, &val))
+		atomic_set(&oplus_binder_ux_flag, val);
+
+	return count;
+}
+
+static long oplus_binder_ux_flag_ioctl(struct file *file,
+				       unsigned int cmd, unsigned long arg)
+{
+	/*
+	 * ColorOS SchedAssist expects this proc node to open and accept ioctl.
+	 * We accept and record the request so userspace stops failing open/ioctl.
+	 */
+	oplus_binder_ux_last_cmd = cmd;
+	atomic64_inc(&oplus_binder_ux_ioctl_count);
+	return 0;
+}
+
+static const struct proc_ops oplus_binder_ux_flag_proc_ops = {
+	.proc_open	= oplus_binder_ux_flag_proc_open,
+	.proc_read	= seq_read,
+	.proc_write	= oplus_binder_ux_flag_proc_write,
+	.proc_ioctl	= oplus_binder_ux_flag_ioctl,
+#ifdef CONFIG_COMPAT
+	.proc_compat_ioctl = oplus_binder_ux_flag_ioctl,
+#endif
+	.proc_lseek	= seq_lseek,
+	.proc_release	= single_release,
+};
+
 static int sched_assist_scene_proc_show(struct seq_file *m, void *v)
 {
 	seq_printf(m, "%d\n", atomic_read(&sched_assist_scene));
@@ -676,6 +740,13 @@ static int __init evx_cos_perf_compat_init(void)
 		proc_create("theiaPwkReport", 0666, NULL,
 			    &theia_pwk_report_proc_ops);
 
+	proc_oplus_binder_dir = proc_mkdir("oplus_binder", NULL);
+	if (proc_oplus_binder_dir)
+		proc_oplus_binder_ux_flag =
+			proc_create("ux_flag", 0666,
+				    proc_oplus_binder_dir,
+				    &oplus_binder_ux_flag_proc_ops);
+
 	proc_oplus_version_dir = proc_mkdir("oplusVersion", NULL);
 	if (proc_oplus_version_dir)
 		proc_oplus_eng_version =
@@ -721,6 +792,11 @@ err_task_cpustats:
 
 static void __exit evx_cos_perf_compat_exit(void)
 {
+	if (proc_oplus_binder_ux_flag)
+		proc_remove(proc_oplus_binder_ux_flag);
+	if (proc_oplus_binder_dir)
+		proc_remove(proc_oplus_binder_dir);
+
 	if (proc_oplus_eng_version)
 		proc_remove(proc_oplus_eng_version);
 	if (proc_oplus_version_dir)
