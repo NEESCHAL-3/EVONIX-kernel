@@ -781,6 +781,34 @@ static const struct proc_ops watchdog_status_proc_ops = {
 	.proc_release	= single_release,
 };
 
+/* EVX_COS_V28: OPlus sched important task compat */
+static int evx_sched_impt_task_show(struct seq_file *m, void *v)
+{
+        seq_puts(m, "0\n");
+        return 0;
+}
+
+static int evx_sched_impt_task_open(struct inode *inode, struct file *file)
+{
+        return single_open(file, evx_sched_impt_task_show, NULL);
+}
+
+static ssize_t evx_sched_impt_task_write(struct file *file,
+                                         const char __user *buf,
+                                         size_t count, loff_t *ppos)
+{
+        return count;
+}
+
+static const struct proc_ops evx_sched_impt_task_fops = {
+        .proc_open      = evx_sched_impt_task_open,
+        .proc_read      = seq_read,
+        .proc_write     = evx_sched_impt_task_write,
+        .proc_lseek     = seq_lseek,
+        .proc_release   = single_release,
+};
+
+
 static int __init evx_cos_perf_compat_init(void)
 {
 	int ret;
@@ -936,6 +964,7 @@ static int __init evx_cos_perf_compat_init(void)
 				proc_create("lb_enable", 0666,
 					    proc_sched_assist_dir,
 					    &sched_assist_lb_enable_proc_ops);
+	proc_create("sched_impt_task", 0666, proc_sched_assist_dir, &evx_sched_impt_task_fops);
 			proc_sched_assist_qos_enable =
 				proc_create("qos_enable", 0666,
 					    proc_sched_assist_dir,
