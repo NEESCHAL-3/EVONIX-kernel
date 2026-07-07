@@ -11492,7 +11492,64 @@ static int cpu_idle_write_s64(struct cgroup_subsys_state *css,
 }
 #endif
 
+
+
+/* EVX_COS_OPLUS_QOS_CGROUP_COMPAT
+ * Legacy OPlus QoS userspace expects:
+ *   cpu.qos_level
+ *   cpu.schedtune.boost
+ *
+ * GKI/uclamp kernels do not expose schedtune. OPlus native still writes
+ * uclamp min/max directly, so these files act as legacy compatibility state
+ * holders to avoid native backend failure while preserving real uclamp writes.
+ */
+static int evx_cpu_qos_level;
+static int evx_cpu_schedtune_boost;
+
+static u64 evx_cpu_qos_level_read_u64(struct cgroup_subsys_state *css,
+				      struct cftype *cft)
+{
+	return READ_ONCE(evx_cpu_qos_level);
+}
+
+static int evx_cpu_qos_level_write_u64(struct cgroup_subsys_state *css,
+				       struct cftype *cft, u64 val)
+{
+	if (val > 1024)
+		val = 1024;
+
+	WRITE_ONCE(evx_cpu_qos_level, (int)val);
+	return 0;
+}
+
+static u64 evx_cpu_schedtune_boost_read_u64(struct cgroup_subsys_state *css,
+					    struct cftype *cft)
+{
+	return READ_ONCE(evx_cpu_schedtune_boost);
+}
+
+static int evx_cpu_schedtune_boost_write_u64(struct cgroup_subsys_state *css,
+					     struct cftype *cft, u64 val)
+{
+	if (val > 100)
+		val = 100;
+
+	WRITE_ONCE(evx_cpu_schedtune_boost, (int)val);
+	return 0;
+}
+
 static struct cftype cpu_legacy_files[] = {
+	{
+		.name = "qos_level",
+		.read_u64 = evx_cpu_qos_level_read_u64,
+		.write_u64 = evx_cpu_qos_level_write_u64,
+	},
+	{
+		.name = "schedtune.boost",
+		.read_u64 = evx_cpu_schedtune_boost_read_u64,
+		.write_u64 = evx_cpu_schedtune_boost_write_u64,
+	},
+
 #ifdef CONFIG_FAIR_GROUP_SCHED
 	{
 		.name = "shares",
