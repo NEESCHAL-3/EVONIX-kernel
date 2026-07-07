@@ -19,7 +19,24 @@ static struct proc_dir_entry *evx_afs_dir;
 static char evx_afs_buf[EVX_AFS_MAX_BUF];
 static size_t evx_afs_len;
 static unsigned long evx_afs_writes;
+static int evx_afs_enable = 1;
 static DEFINE_MUTEX(evx_afs_lock);
+
+/*
+ * Minimal binary android.os.afsConfig.AfsConfig protobuf:
+ *   sceneTypeMax = 2
+ *   sceneConfig { sceneType = SCENE_SYSTEM_UI(0) }
+ *   sceneConfig { sceneType = SCENE_LAUNCHER(1) }
+ *
+ * Wire guess is from afsConfig.so embedded proto descriptors:
+ * AfsConfig: sceneTypeMax, sceneConfig
+ * SceneConfig: sceneType
+ */
+static const unsigned char evx_afs_default_proto[] = {
+        0x08, 0x02,
+        0x12, 0x02, 0x08, 0x00,
+        0x12, 0x02, 0x08, 0x01,
+};
 
 static int evx_afs_config_show(struct seq_file *m, void *v)
 {
@@ -27,7 +44,8 @@ static int evx_afs_config_show(struct seq_file *m, void *v)
         if (evx_afs_len)
                 seq_write(m, evx_afs_buf, evx_afs_len);
         else
-                seq_puts(m, "0\n");
+                seq_write(m, evx_afs_default_proto,
+                          sizeof(evx_afs_default_proto));
         mutex_unlock(&evx_afs_lock);
         return 0;
 }
@@ -64,6 +82,46 @@ static const struct proc_ops evx_afs_config_fops = {
         .proc_release   = single_release,
 };
 
+
+static int evx_afs_enable_show(struct seq_file *m, void *v)
+{
+        seq_printf(m, "%d\n", evx_afs_enable);
+        return 0;
+}
+
+static int evx_afs_enable_open(struct inode *inode, struct file *file)
+{
+        return single_open(file, evx_afs_enable_show, NULL);
+}
+
+static ssize_t evx_afs_enable_write(struct file *file,
+                                    const char __user *buf,
+                                    size_t count, loff_t *ppos)
+{
+        char tmp[16] = {0};
+        long val;
+
+        if (count) {
+                size_t n = min_t(size_t, count, sizeof(tmp) - 1);
+
+                if (copy_from_user(tmp, buf, n))
+                        return -EFAULT;
+
+                if (!kstrtol(tmp, 0, &val))
+                        evx_afs_enable = !!val;
+        }
+
+        return count;
+}
+
+static const struct proc_ops evx_afs_enable_fops = {
+        .proc_open      = evx_afs_enable_open,
+        .proc_read      = seq_read,
+        .proc_write     = evx_afs_enable_write,
+        .proc_lseek     = seq_lseek,
+        .proc_release   = single_release,
+};
+
 static int __init evx_cos_afs_compat_init(void)
 {
         evx_afs_dir = proc_mkdir("oplus_afs_config", NULL);
@@ -71,8 +129,9 @@ static int __init evx_cos_afs_compat_init(void)
                 return 0;
 
         proc_create("afs_config", 0666, evx_afs_dir, &evx_afs_config_fops);
+        proc_create("afs_enable", 0666, evx_afs_dir, &evx_afs_enable_fops);
 
-        pr_info("evonix_cos_afs: AFS proc compat ready\n");
+        pr_info("evonix_cos_afs: AFS binary proc compat ready\n");
         return 0;
 }
 
