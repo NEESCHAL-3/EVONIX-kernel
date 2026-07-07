@@ -172,36 +172,46 @@ static int evx_get_fast_chg_type(void)
 static int evx_get_shell_temp_mc(void)
 {
 	static const char * const zones[] = {
-		"board_sensor",
-		"board-therm",
-		"mtktsboard",
-		"vtskin-max",
-		"vtskin",
-		"skin",
 		"battery",
-		"mtktsbattery",
+		"bms",
+		"mt6375-gauge",
+		"quiet_therm",
+		"wifi_therm",
+		"flash_therm",
+		"charger1_therm",
+		"ScreenPmic_therm",
+		"mtktsAP",
+		"soc_max",
+		"consys",
 	};
 	int i;
 	int temp;
 	int bat_temp;
 	struct thermal_zone_device *tz;
 
+	/*
+	 * Real primary backend:
+	 * /sys/class/power_supply/battery/temp exists on rodin.
+	 * power_supply temp is normally deci-Celsius:
+	 * 381 => 38.1C => 38100 milli-Celsius.
+	 */
+	if (!evx_psy_get_int("battery", POWER_SUPPLY_PROP_TEMP, &bat_temp))
+		return bat_temp * 100;
+
+	if (!evx_psy_get_int("bms", POWER_SUPPLY_PROP_TEMP, &bat_temp))
+		return bat_temp * 100;
+
+	/*
+	 * Real fallback: use actual thermal zone names observed on rodin.
+	 */
 	for (i = 0; i < ARRAY_SIZE(zones); i++) {
 		tz = thermal_zone_get_zone_by_name(zones[i]);
 		if (IS_ERR(tz))
 			continue;
 
-		if (!thermal_zone_get_temp(tz, &temp)) {
+		if (!thermal_zone_get_temp(tz, &temp))
 			return temp;
-		}
 	}
-
-	/*
-	 * Real fallback: battery TEMP is usually deci-Celsius in power_supply,
-	 * so 349 => 34.9C => 34900 m°C.
-	 */
-	if (!evx_psy_get_int("battery", POWER_SUPPLY_PROP_TEMP, &bat_temp))
-		return bat_temp * 100;
 
 	return -ENODEV;
 }
