@@ -35,6 +35,15 @@ static u64 watchdog_last_kick_ns;
 static char watchdog_last_payload[64];
 
 static struct device *evx_ufs_dev;
+static struct platform_device *evx_bootdevice_pdev;
+static struct proc_dir_entry *proc_devinfo_dir;
+static struct proc_dir_entry *proc_devinfo_ufsplus_status;
+static struct proc_dir_entry *proc_ufs_signal_dir;
+static struct proc_dir_entry *proc_ufs_signal_record_upload;
+static struct proc_dir_entry *proc_oplus_qos_dir;
+static struct proc_dir_entry *proc_oplus_qos_enable;
+static struct proc_dir_entry *proc_sched_assist_qos_enable;
+static struct proc_dir_entry *proc_oplus_scheduler_qos_enable;
 static struct proc_dir_entry *proc_oplus_binder_dir;
 static struct proc_dir_entry *proc_oplus_binder_ux_flag;
 static struct proc_dir_entry *proc_oplus_scheduler_dir;
@@ -55,6 +64,7 @@ static struct proc_dir_entry *proc_io_metrics_forever_dir;
 static struct proc_dir_entry *proc_ufs_total_read_size_mb;
 static struct proc_dir_entry *proc_ufs_total_write_size_mb;
 
+static atomic_t oplus_qos_enable = ATOMIC_INIT(1);
 static atomic_t oplus_binder_ux_flag = ATOMIC_INIT(0);
 static atomic64_t oplus_binder_ux_ioctl_count;
 static unsigned int oplus_binder_ux_last_cmd;
@@ -141,6 +151,90 @@ static DEVICE_ATTR_RW(virtualtlcbuff);
  * This stores the real scene written/read by userspace. It does not fake
  * frequency boosting; it only provides the demanded scene state interface.
  */
+static int oplus_qos_enable_proc_show(struct seq_file *m, void *v)
+{
+	seq_printf(m, "%d\n", atomic_read(&oplus_qos_enable));
+	return 0;
+}
+
+static int oplus_qos_enable_proc_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, oplus_qos_enable_proc_show, NULL);
+}
+
+static ssize_t oplus_qos_enable_proc_write(struct file *file,
+					   const char __user *buf,
+					   size_t count, loff_t *ppos)
+{
+	char kbuf[32];
+	int val;
+
+	if (count >= sizeof(kbuf))
+		count = sizeof(kbuf) - 1;
+
+	if (copy_from_user(kbuf, buf, count))
+		return -EFAULT;
+
+	kbuf[count] = '\0';
+
+	if (!kstrtoint(kbuf, 0, &val))
+		atomic_set(&oplus_qos_enable, val ? 1 : 0);
+
+	return count;
+}
+
+static const struct proc_ops oplus_qos_enable_proc_ops = {
+	.proc_open	= oplus_qos_enable_proc_open,
+	.proc_read	= seq_read,
+	.proc_write	= oplus_qos_enable_proc_write,
+	.proc_lseek	= seq_lseek,
+	.proc_release	= single_release,
+};
+
+static int ufsplus_status_proc_show(struct seq_file *m, void *v)
+{
+	seq_puts(m, "1\n");
+	return 0;
+}
+
+static int ufsplus_status_proc_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, ufsplus_status_proc_show, NULL);
+}
+
+static const struct proc_ops ufsplus_status_proc_ops = {
+	.proc_open	= ufsplus_status_proc_open,
+	.proc_read	= seq_read,
+	.proc_lseek	= seq_lseek,
+	.proc_release	= single_release,
+};
+
+static int ufs_signal_record_upload_proc_show(struct seq_file *m, void *v)
+{
+	seq_puts(m, "0\n");
+	return 0;
+}
+
+static int ufs_signal_record_upload_proc_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, ufs_signal_record_upload_proc_show, NULL);
+}
+
+static ssize_t ufs_signal_record_upload_proc_write(struct file *file,
+						   const char __user *buf,
+						   size_t count, loff_t *ppos)
+{
+	return count;
+}
+
+static const struct proc_ops ufs_signal_record_upload_proc_ops = {
+	.proc_open	= ufs_signal_record_upload_proc_open,
+	.proc_read	= seq_read,
+	.proc_write	= ufs_signal_record_upload_proc_write,
+	.proc_lseek	= seq_lseek,
+	.proc_release	= single_release,
+};
+
 static int oplus_binder_ux_flag_proc_show(struct seq_file *m, void *v)
 {
 	seq_printf(m, "%d\n", atomic_read(&oplus_binder_ux_flag));
@@ -317,24 +411,12 @@ static const struct proc_ops ufs_total_write_size_mb_proc_ops = {
 
 static int swpm_sp_ddr_idx_proc_show(struct seq_file *m, void *v)
 {
-	char buf[128];
-	ssize_t ret;
-
 	/*
-	 * Real SWPM-backed compatibility:
-	 * Source tree/device exposes /proc/swpm/enable. When SWPM is disabled
-	 * or not reporting DDR buckets, return zero residency buckets instead
-	 * of a missing node.
+	 * Real MTK SWPM may be disabled or return no DDR buckets on this build.
+	 * Always return stable readable residency buckets so OPlus powerstats
+	 * does not fail read() with empty/error data.
 	 */
-	ret = evx_read_real_sysfs("/proc/swpm/enable", buf, sizeof(buf));
-	if (ret < 0)
-		return ret;
-
-	if (strstr(buf, "0x0"))
-		seq_puts(m, "0 0 0 0 0 0 0 0\n");
-	else
-		seq_puts(m, "0 0 0 0 0 0 0 0\n");
-
+	seq_puts(m, "0 0 0 0 0 0 0 0\n");
 	return 0;
 }
 
@@ -672,6 +754,8 @@ static const struct proc_ops watchdog_status_proc_ops = {
 
 static int __init evx_cos_perf_compat_init(void)
 {
+	int ret;
+
 	proc_task_cpustats = proc_create("task_cpustats", 0444, NULL,
 					 &task_cpustats_proc_ops);
 	if (!proc_task_cpustats)
@@ -740,6 +824,38 @@ static int __init evx_cos_perf_compat_init(void)
 		proc_create("theiaPwkReport", 0666, NULL,
 			    &theia_pwk_report_proc_ops);
 
+	evx_bootdevice_pdev =
+		platform_device_register_simple("bootdevice", -1, NULL, 0);
+	if (!IS_ERR(evx_bootdevice_pdev)) {
+		ret = device_create_file(&evx_bootdevice_pdev->dev,
+					 &dev_attr_ufs_transmission_status);
+		if (ret)
+			pr_warn(EVX_PERF_NAME ": bootdevice ufs status create failed: %d\n",
+				ret);
+	} else {
+		pr_warn(EVX_PERF_NAME ": bootdevice platform register failed: %ld\n",
+			PTR_ERR(evx_bootdevice_pdev));
+		evx_bootdevice_pdev = NULL;
+	}
+
+	proc_devinfo_dir = proc_mkdir("devinfo", NULL);
+	if (proc_devinfo_dir)
+		proc_devinfo_ufsplus_status =
+			proc_create("ufsplus_status", 0444, proc_devinfo_dir,
+				    &ufsplus_status_proc_ops);
+
+	proc_ufs_signal_dir = proc_mkdir("ufs_signalShow", NULL);
+	if (proc_ufs_signal_dir)
+		proc_ufs_signal_record_upload =
+			proc_create("record_upload", 0666, proc_ufs_signal_dir,
+				    &ufs_signal_record_upload_proc_ops);
+
+	proc_oplus_qos_dir = proc_mkdir("oplus_qos", NULL);
+	if (proc_oplus_qos_dir)
+		proc_oplus_qos_enable =
+			proc_create("qos_enable", 0666, proc_oplus_qos_dir,
+				    &oplus_qos_enable_proc_ops);
+
 	proc_oplus_binder_dir = proc_mkdir("oplus_binder", NULL);
 	if (proc_oplus_binder_dir)
 		proc_oplus_binder_ux_flag =
@@ -756,6 +872,10 @@ static int __init evx_cos_perf_compat_init(void)
 
 	proc_oplus_scheduler_dir = proc_mkdir("oplus_scheduler", NULL);
 	if (proc_oplus_scheduler_dir) {
+		proc_oplus_scheduler_qos_enable =
+			proc_create("qos_enable", 0666,
+				    proc_oplus_scheduler_dir,
+				    &oplus_qos_enable_proc_ops);
 		proc_sched_assist_dir = proc_mkdir("sched_assist",
 						   proc_oplus_scheduler_dir);
 		if (proc_sched_assist_dir) {
@@ -775,6 +895,10 @@ static int __init evx_cos_perf_compat_init(void)
 				proc_create("lb_enable", 0666,
 					    proc_sched_assist_dir,
 					    &sched_assist_lb_enable_proc_ops);
+			proc_sched_assist_qos_enable =
+				proc_create("qos_enable", 0666,
+					    proc_sched_assist_dir,
+					    &oplus_qos_enable_proc_ops);
 		}
 	}
 
@@ -792,6 +916,31 @@ err_task_cpustats:
 
 static void __exit evx_cos_perf_compat_exit(void)
 {
+	if (proc_sched_assist_qos_enable)
+		proc_remove(proc_sched_assist_qos_enable);
+	if (proc_oplus_scheduler_qos_enable)
+		proc_remove(proc_oplus_scheduler_qos_enable);
+	if (proc_oplus_qos_enable)
+		proc_remove(proc_oplus_qos_enable);
+	if (proc_oplus_qos_dir)
+		proc_remove(proc_oplus_qos_dir);
+
+	if (proc_ufs_signal_record_upload)
+		proc_remove(proc_ufs_signal_record_upload);
+	if (proc_ufs_signal_dir)
+		proc_remove(proc_ufs_signal_dir);
+	if (proc_devinfo_ufsplus_status)
+		proc_remove(proc_devinfo_ufsplus_status);
+	if (proc_devinfo_dir)
+		proc_remove(proc_devinfo_dir);
+
+	if (evx_bootdevice_pdev) {
+		device_remove_file(&evx_bootdevice_pdev->dev,
+				   &dev_attr_ufs_transmission_status);
+		platform_device_unregister(evx_bootdevice_pdev);
+		evx_bootdevice_pdev = NULL;
+	}
+
 	if (proc_oplus_binder_ux_flag)
 		proc_remove(proc_oplus_binder_ux_flag);
 	if (proc_oplus_binder_dir)

@@ -2178,7 +2178,24 @@ static DEVICE_ATTR_RW(recomp_algorithm);
 static DEVICE_ATTR_WO(recompress);
 #endif
 
+static ssize_t hybridswap_swapd_pause_show(struct device *dev,
+					    struct device_attribute *attr,
+					    char *buf)
+{
+	return scnprintf(buf, PAGE_SIZE, "0\n");
+}
+
+static ssize_t hybridswap_swapd_pause_store(struct device *dev,
+					     struct device_attribute *attr,
+					     const char *buf, size_t len)
+{
+	return len;
+}
+
+static DEVICE_ATTR_RW(hybridswap_swapd_pause);
+
 static struct attribute *zram_disk_attrs[] = {
+	&dev_attr_hybridswap_swapd_pause.attr,
 	&dev_attr_disksize.attr,
 	&dev_attr_initstate.attr,
 	&dev_attr_reset.attr,

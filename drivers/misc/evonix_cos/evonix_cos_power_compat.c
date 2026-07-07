@@ -28,9 +28,12 @@ static struct device *oplus_battery_dev;
 static struct device *oplus_usb_dev;
 static struct power_supply *evx_ac_psy;
 static struct power_supply *evx_pc_port_psy;
+static struct power_supply *evx_wireless_psy;
 
 static struct proc_dir_entry *proc_charger_dir;
 static struct proc_dir_entry *proc_input_current_now;
+static struct proc_dir_entry *proc_passedchg;
+static struct proc_dir_entry *proc_passedchg_reset_count;
 static struct proc_dir_entry *proc_shell_temp;
 
 static atomic64_t shell_temp_write_count;
@@ -263,6 +266,26 @@ static const struct power_supply_desc evx_pc_port_power_supply_desc = {
 	.get_property	= evx_supply_online_get_property,
 };
 
+static int evx_wireless_get_property(struct power_supply *psy,
+				     enum power_supply_property psp,
+				     union power_supply_propval *val)
+{
+	if (psp != POWER_SUPPLY_PROP_ONLINE)
+		return -EINVAL;
+
+	/* rodin has no wireless charging coil */
+	val->intval = 0;
+	return 0;
+}
+
+static const struct power_supply_desc evx_wireless_power_supply_desc = {
+	.name		= "wireless",
+	.type		= POWER_SUPPLY_TYPE_WIRELESS,
+	.properties	= evx_online_props,
+	.num_properties	= ARRAY_SIZE(evx_online_props),
+	.get_property	= evx_wireless_get_property,
+};
+
 static void evx_register_power_supply_aliases(void)
 {
 	struct power_supply_config cfg = {};
@@ -281,10 +304,24 @@ static void evx_register_power_supply_aliases(void)
 			PTR_ERR(evx_pc_port_psy));
 		evx_pc_port_psy = NULL;
 	}
+
+	evx_wireless_psy =
+		power_supply_register(NULL, &evx_wireless_power_supply_desc, &cfg);
+	if (IS_ERR(evx_wireless_psy)) {
+		pr_warn(EVX_NAME ": wireless power_supply alias failed: %ld\n",
+			PTR_ERR(evx_wireless_psy));
+		evx_wireless_psy = NULL;
+	}
+
 }
 
 static void evx_unregister_power_supply_aliases(void)
 {
+	if (evx_wireless_psy) {
+		power_supply_unregister(evx_wireless_psy);
+		evx_wireless_psy = NULL;
+	}
+
 	if (evx_pc_port_psy) {
 		power_supply_unregister(evx_pc_port_psy);
 		evx_pc_port_psy = NULL;
@@ -314,6 +351,140 @@ static ssize_t gauge_car_c_show(struct device *dev,
 }
 
 static DEVICE_ATTR_RO(gauge_car_c);
+
+static int evx_get_design_capacity_mah(void)
+{
+	int val;
+
+	if (!evx_psy_get_int("bms", POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN, &val))
+		return val / 1000;
+	if (!evx_psy_get_int("battery", POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN, &val))
+		return val / 1000;
+	if (!evx_psy_get_int("bms", POWER_SUPPLY_PROP_CHARGE_FULL, &val))
+		return val / 1000;
+	if (!evx_psy_get_int("battery", POWER_SUPPLY_PROP_CHARGE_FULL, &val))
+		return val / 1000;
+
+	return 5000;
+}
+
+static int evx_get_full_capacity_mah(void)
+{
+	int val;
+
+	if (!evx_psy_get_int("bms", POWER_SUPPLY_PROP_CHARGE_FULL, &val))
+		return val / 1000;
+	if (!evx_psy_get_int("battery", POWER_SUPPLY_PROP_CHARGE_FULL, &val))
+		return val / 1000;
+
+	return evx_get_design_capacity_mah();
+}
+
+static int evx_get_charge_counter_mah(void)
+{
+	int val;
+
+	if (!evx_psy_get_int("bms", POWER_SUPPLY_PROP_CHARGE_COUNTER, &val))
+		return val / 1000;
+	if (!evx_psy_get_int("battery", POWER_SUPPLY_PROP_CHARGE_COUNTER, &val))
+		return val / 1000;
+
+	return evx_get_battery_rm_mah();
+}
+
+static ssize_t battery_soh_show(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	return sysfs_emit(buf, "100\n");
+}
+static DEVICE_ATTR_RO(battery_soh);
+
+static ssize_t battery_cc_show(struct device *dev,
+			       struct device_attribute *attr, char *buf)
+{
+	return sysfs_emit(buf, "%d\n", evx_get_charge_counter_mah());
+}
+static DEVICE_ATTR_RO(battery_cc);
+
+static ssize_t battery_dod_show(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	int cap = evx_get_battery_capacity();
+
+	if (cap < 0)
+		cap = 100;
+
+	return sysfs_emit(buf, "%d\n", 100 - cap);
+}
+static DEVICE_ATTR_RO(battery_dod);
+
+static ssize_t design_capacity_show(struct device *dev,
+				    struct device_attribute *attr, char *buf)
+{
+	return sysfs_emit(buf, "%d\n", evx_get_design_capacity_mah());
+}
+static DEVICE_ATTR_RO(design_capacity);
+
+static ssize_t battery_fcc_show(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	return sysfs_emit(buf, "%d\n", evx_get_full_capacity_mah());
+}
+static DEVICE_ATTR_RO(battery_fcc);
+
+static ssize_t battery_qmax_show(struct device *dev,
+				 struct device_attribute *attr, char *buf)
+{
+	return sysfs_emit(buf, "%d\n", evx_get_design_capacity_mah());
+}
+static DEVICE_ATTR_RO(battery_qmax);
+
+static ssize_t battery_temp_show(struct device *dev,
+				 struct device_attribute *attr, char *buf)
+{
+	int temp;
+
+	if (!evx_psy_get_int("battery", POWER_SUPPLY_PROP_TEMP, &temp))
+		return sysfs_emit(buf, "%d\n", temp);
+	if (!evx_psy_get_int("bms", POWER_SUPPLY_PROP_TEMP, &temp))
+		return sysfs_emit(buf, "%d\n", temp);
+
+	return sysfs_emit(buf, "250\n");
+}
+static DEVICE_ATTR_RO(battery_temp);
+
+static void evx_create_optional_battery_attrs(void)
+{
+	int ret;
+
+#define EVX_CREATE_BATT_ATTR(_name) \
+	do { \
+		ret = device_create_file(oplus_battery_dev, &dev_attr_##_name); \
+		if (ret && ret != -EEXIST) \
+			pr_warn(EVX_NAME ": " #_name " create failed: %d\n", ret); \
+	} while (0)
+
+	EVX_CREATE_BATT_ATTR(battery_soh);
+	EVX_CREATE_BATT_ATTR(battery_cc);
+	EVX_CREATE_BATT_ATTR(battery_dod);
+	EVX_CREATE_BATT_ATTR(design_capacity);
+	EVX_CREATE_BATT_ATTR(battery_fcc);
+	EVX_CREATE_BATT_ATTR(battery_qmax);
+	EVX_CREATE_BATT_ATTR(battery_temp);
+
+#undef EVX_CREATE_BATT_ATTR
+}
+
+static void evx_remove_optional_battery_attrs(void)
+{
+	device_remove_file(oplus_battery_dev, &dev_attr_battery_temp);
+	device_remove_file(oplus_battery_dev, &dev_attr_battery_qmax);
+	device_remove_file(oplus_battery_dev, &dev_attr_battery_fcc);
+	device_remove_file(oplus_battery_dev, &dev_attr_design_capacity);
+	device_remove_file(oplus_battery_dev, &dev_attr_battery_dod);
+	device_remove_file(oplus_battery_dev, &dev_attr_battery_cc);
+	device_remove_file(oplus_battery_dev, &dev_attr_battery_soh);
+}
 
 static ssize_t chip_soc_show(struct device *dev,
 			     struct device_attribute *attr, char *buf)
@@ -364,6 +535,42 @@ static ssize_t fast_chg_type_show(struct device *dev,
 static DEVICE_ATTR_RO(fast_chg_type);
 
 /* /proc/charger/input_current_now */
+static int passedchg_proc_show(struct seq_file *m, void *v)
+{
+	seq_puts(m, "0\n");
+	return 0;
+}
+
+static int passedchg_proc_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, passedchg_proc_show, NULL);
+}
+
+static const struct proc_ops passedchg_proc_ops = {
+	.proc_open	= passedchg_proc_open,
+	.proc_read	= seq_read,
+	.proc_lseek	= seq_lseek,
+	.proc_release	= single_release,
+};
+
+static int passedchg_reset_count_proc_show(struct seq_file *m, void *v)
+{
+	seq_puts(m, "0\n");
+	return 0;
+}
+
+static int passedchg_reset_count_proc_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, passedchg_reset_count_proc_show, NULL);
+}
+
+static const struct proc_ops passedchg_reset_count_proc_ops = {
+	.proc_open	= passedchg_reset_count_proc_open,
+	.proc_read	= seq_read,
+	.proc_lseek	= seq_lseek,
+	.proc_release	= single_release,
+};
+
 static int input_current_now_proc_show(struct seq_file *m, void *v)
 {
 	int cur = evx_get_usb_current_now();
@@ -491,6 +698,12 @@ static int __init evx_cos_power_compat_init(void)
 	proc_input_current_now = proc_create("input_current_now", 0444,
 					     proc_charger_dir,
 					     &input_current_now_proc_ops);
+	proc_passedchg =
+		proc_create("passedchg", 0444, proc_charger_dir,
+			    &passedchg_proc_ops);
+	proc_passedchg_reset_count =
+		proc_create("passedchg_reset_count", 0444, proc_charger_dir,
+			    &passedchg_reset_count_proc_ops);
 	if (!proc_input_current_now) {
 		ret = -ENOMEM;
 		goto err_remove_proc_charger;
@@ -502,6 +715,8 @@ static int __init evx_cos_power_compat_init(void)
 		ret = -ENOMEM;
 		goto err_remove_input_current;
 	}
+
+	evx_create_optional_battery_attrs();
 
 	pr_info(EVX_NAME ": loaded real-backed ColorOS power compatibility nodes\n");
 	return 0;
@@ -530,9 +745,14 @@ err_class:
 
 static void __exit evx_cos_power_compat_exit(void)
 {
+	evx_remove_optional_battery_attrs();
 	evx_unregister_power_supply_aliases();
 	if (proc_shell_temp)
 		proc_remove(proc_shell_temp);
+	if (proc_passedchg_reset_count)
+		proc_remove(proc_passedchg_reset_count);
+	if (proc_passedchg)
+		proc_remove(proc_passedchg);
 	if (proc_input_current_now)
 		proc_remove(proc_input_current_now);
 	if (proc_charger_dir)
