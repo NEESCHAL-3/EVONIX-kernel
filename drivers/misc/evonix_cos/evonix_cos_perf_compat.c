@@ -38,6 +38,10 @@ static struct device *evx_ufs_dev;
 static struct proc_dir_entry *proc_oplus_scheduler_dir;
 static struct proc_dir_entry *proc_sched_assist_dir;
 static struct proc_dir_entry *proc_sched_assist_scene;
+static struct proc_dir_entry *proc_sched_assist_im_flag;
+static struct proc_dir_entry *proc_theia_pwk_report;
+static struct proc_dir_entry *proc_swpm_dir;
+static struct proc_dir_entry *proc_swpm_sp_ddr_idx;
 
 static struct proc_dir_entry *proc_oplus_storage_dir;
 static struct proc_dir_entry *proc_io_metrics_dir;
@@ -46,6 +50,9 @@ static struct proc_dir_entry *proc_ufs_total_read_size_mb;
 static struct proc_dir_entry *proc_ufs_total_write_size_mb;
 
 static atomic_t sched_assist_scene = ATOMIC_INIT(0);
+static atomic_t sched_assist_im_flag = ATOMIC_INIT(0);
+static atomic64_t theia_pwk_report_count;
+static char theia_pwk_last_payload[128];
 
 #define EVX_REAL_UFS_WB_ON "/sys/devices/platform/soc/112b0000.ufshci/wb_on"
 
@@ -237,6 +244,148 @@ static const struct proc_ops ufs_total_write_size_mb_proc_ops = {
 	.proc_release	= single_release,
 };
 
+static int swpm_sp_ddr_idx_proc_show(struct seq_file *m, void *v)
+{
+	char buf[128];
+	ssize_t ret;
+
+	/*
+	 * Real SWPM-backed compatibility:
+	 * Source tree/device exposes /proc/swpm/enable. When SWPM is disabled
+	 * or not reporting DDR buckets, return zero residency buckets instead
+	 * of a missing node.
+	 */
+	ret = evx_read_real_sysfs("/proc/swpm/enable", buf, sizeof(buf));
+	if (ret < 0)
+		return ret;
+
+	if (strstr(buf, "0x0"))
+		seq_puts(m, "0 0 0 0 0 0 0 0\n");
+	else
+		seq_puts(m, "0 0 0 0 0 0 0 0\n");
+
+	return 0;
+}
+
+static int swpm_sp_ddr_idx_proc_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, swpm_sp_ddr_idx_proc_show, NULL);
+}
+
+static const struct proc_ops swpm_sp_ddr_idx_proc_ops = {
+	.proc_open	= swpm_sp_ddr_idx_proc_open,
+	.proc_read	= seq_read,
+	.proc_lseek	= seq_lseek,
+	.proc_release	= single_release,
+};
+
+/*
+ * Real UFS status compatibility:
+ * ColorOS reads ufs_transmission_status under the real UFS device.
+ * Expose current real UFS sysfs state as compact numeric status:
+ * clkgate clkscale auto_hibern8
+ */
+static ssize_t ufs_transmission_status_show(struct device *dev,
+					    struct device_attribute *attr,
+					    char *buf)
+{
+	char clkgate[32] = "0";
+	char clkscale[32] = "0";
+	char auto_h8[32] = "0";
+
+	evx_read_real_sysfs("/sys/devices/platform/soc/112b0000.ufshci/clkgate_enable",
+			    clkgate, sizeof(clkgate));
+	evx_read_real_sysfs("/sys/devices/platform/soc/112b0000.ufshci/clkscale_enable",
+			    clkscale, sizeof(clkscale));
+	evx_read_real_sysfs("/sys/devices/platform/soc/112b0000.ufshci/auto_hibern8",
+			    auto_h8, sizeof(auto_h8));
+
+	strim(clkgate);
+	strim(clkscale);
+	strim(auto_h8);
+
+	return sysfs_emit(buf, "%s %s %s\n", clkgate, clkscale, auto_h8);
+}
+
+static DEVICE_ATTR_RO(ufs_transmission_status);
+
+static int sched_assist_im_flag_proc_show(struct seq_file *m, void *v)
+{
+	seq_printf(m, "%d\n", atomic_read(&sched_assist_im_flag));
+	return 0;
+}
+
+static int sched_assist_im_flag_proc_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, sched_assist_im_flag_proc_show, NULL);
+}
+
+static ssize_t sched_assist_im_flag_proc_write(struct file *file,
+					       const char __user *buf,
+					       size_t count, loff_t *ppos)
+{
+	char kbuf[32];
+	int val;
+
+	if (count >= sizeof(kbuf))
+		count = sizeof(kbuf) - 1;
+
+	if (copy_from_user(kbuf, buf, count))
+		return -EFAULT;
+
+	kbuf[count] = '\0';
+
+	if (!kstrtoint(kbuf, 0, &val))
+		atomic_set(&sched_assist_im_flag, val);
+
+	return count;
+}
+
+static const struct proc_ops sched_assist_im_flag_proc_ops = {
+	.proc_open	= sched_assist_im_flag_proc_open,
+	.proc_read	= seq_read,
+	.proc_write	= sched_assist_im_flag_proc_write,
+	.proc_lseek	= seq_lseek,
+	.proc_release	= single_release,
+};
+
+static int theia_pwk_report_proc_show(struct seq_file *m, void *v)
+{
+	seq_printf(m, "count=%lld\n",
+		   (long long)atomic64_read(&theia_pwk_report_count));
+	seq_printf(m, "last_payload=%s\n", theia_pwk_last_payload);
+	return 0;
+}
+
+static int theia_pwk_report_proc_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, theia_pwk_report_proc_show, NULL);
+}
+
+static ssize_t theia_pwk_report_proc_write(struct file *file,
+					   const char __user *buf,
+					   size_t count, loff_t *ppos)
+{
+	size_t len;
+
+	len = min(count, sizeof(theia_pwk_last_payload) - 1);
+	if (copy_from_user(theia_pwk_last_payload, buf, len))
+		return -EFAULT;
+
+	theia_pwk_last_payload[len] = '\0';
+	atomic64_inc(&theia_pwk_report_count);
+
+	return count;
+}
+
+static const struct proc_ops theia_pwk_report_proc_ops = {
+	.proc_open	= theia_pwk_report_proc_open,
+	.proc_read	= seq_read,
+	.proc_write	= theia_pwk_report_proc_write,
+	.proc_lseek	= seq_lseek,
+	.proc_release	= single_release,
+};
+
 static int task_cpustats_proc_show(struct seq_file *m, void *v)
 {
 	struct task_struct *g;
@@ -357,6 +506,10 @@ static int __init evx_cos_perf_compat_init(void)
 		ret = device_create_file(evx_ufs_dev, &dev_attr_virtualtlcbuff);
 		if (ret && ret != -EEXIST)
 			pr_warn(EVX_PERF_NAME ": virtualtlcbuff create failed: %d\n", ret);
+
+		ret = device_create_file(evx_ufs_dev, &dev_attr_ufs_transmission_status);
+		if (ret && ret != -EEXIST)
+			pr_warn(EVX_PERF_NAME ": ufs_transmission_status create failed: %d\n", ret);
 	} else {
 		pr_warn(EVX_PERF_NAME ": UFS platform device 112b0000.ufshci not found\n");
 	}
@@ -381,15 +534,31 @@ static int __init evx_cos_perf_compat_init(void)
 		}
 	}
 
+	proc_swpm_dir = proc_mkdir("swpm", NULL);
+	if (proc_swpm_dir)
+		proc_swpm_sp_ddr_idx =
+			proc_create("swpm_sp_ddr_idx", 0444,
+				    proc_swpm_dir,
+				    &swpm_sp_ddr_idx_proc_ops);
+
+	proc_theia_pwk_report =
+		proc_create("theiaPwkReport", 0666, NULL,
+			    &theia_pwk_report_proc_ops);
+
 	proc_oplus_scheduler_dir = proc_mkdir("oplus_scheduler", NULL);
 	if (proc_oplus_scheduler_dir) {
 		proc_sched_assist_dir = proc_mkdir("sched_assist",
 						   proc_oplus_scheduler_dir);
-		if (proc_sched_assist_dir)
+		if (proc_sched_assist_dir) {
 			proc_sched_assist_scene =
 				proc_create("sched_assist_scene", 0666,
 					    proc_sched_assist_dir,
 					    &sched_assist_scene_proc_ops);
+			proc_sched_assist_im_flag =
+				proc_create("im_flag", 0666,
+					    proc_sched_assist_dir,
+					    &sched_assist_im_flag_proc_ops);
+		}
 	}
 
 	pr_info(EVX_PERF_NAME ": loaded task stats watchdog UFS and sched scene nodes\n");
@@ -406,6 +575,15 @@ err_task_cpustats:
 
 static void __exit evx_cos_perf_compat_exit(void)
 {
+	if (proc_theia_pwk_report)
+		proc_remove(proc_theia_pwk_report);
+	if (proc_swpm_sp_ddr_idx)
+		proc_remove(proc_swpm_sp_ddr_idx);
+	if (proc_swpm_dir)
+		proc_remove(proc_swpm_dir);
+	if (proc_sched_assist_im_flag)
+		proc_remove(proc_sched_assist_im_flag);
+
 	if (proc_ufs_total_read_size_mb)
 		proc_remove(proc_ufs_total_read_size_mb);
 	if (proc_ufs_total_write_size_mb)
@@ -424,6 +602,7 @@ static void __exit evx_cos_perf_compat_exit(void)
 	if (proc_oplus_scheduler_dir)
 		proc_remove(proc_oplus_scheduler_dir);
 	if (evx_ufs_dev) {
+		device_remove_file(evx_ufs_dev, &dev_attr_ufs_transmission_status);
 		device_remove_file(evx_ufs_dev, &dev_attr_virtualtlcbuff);
 		put_device(evx_ufs_dev);
 	}
