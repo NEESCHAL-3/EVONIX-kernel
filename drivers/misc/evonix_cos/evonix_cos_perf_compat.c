@@ -809,6 +809,34 @@ static const struct proc_ops evx_sched_impt_task_fops = {
 };
 
 
+/* EVX_COS_V28_R4: OPlus sched_assist im_flag_app compat */
+static int evx_im_flag_app_show(struct seq_file *m, void *v)
+{
+        seq_puts(m, "0\n");
+        return 0;
+}
+
+static int evx_im_flag_app_open(struct inode *inode, struct file *file)
+{
+        return single_open(file, evx_im_flag_app_show, NULL);
+}
+
+static ssize_t evx_im_flag_app_write(struct file *file,
+                                     const char __user *buf,
+                                     size_t count, loff_t *ppos)
+{
+        return count;
+}
+
+static const struct proc_ops evx_im_flag_app_fops = {
+        .proc_open      = evx_im_flag_app_open,
+        .proc_read      = seq_read,
+        .proc_write     = evx_im_flag_app_write,
+        .proc_lseek     = seq_lseek,
+        .proc_release   = single_release,
+};
+
+
 static int __init evx_cos_perf_compat_init(void)
 {
 	int ret;
@@ -956,6 +984,7 @@ static int __init evx_cos_perf_compat_init(void)
 				proc_create("im_flag", 0666,
 					    proc_sched_assist_dir,
 					    &sched_assist_im_flag_proc_ops);
+	proc_create("im_flag_app", 0666, proc_sched_assist_dir, &evx_im_flag_app_fops);
 			proc_sched_assist_debug_enabled =
 				proc_create("debug_enabled", 0666,
 					    proc_sched_assist_dir,
