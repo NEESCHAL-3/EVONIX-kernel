@@ -6,6 +6,7 @@
  * power_supply or thermal backend. If the backend is unavailable, return error.
  */
 
+#include <linux/atomic.h>
 #include <linux/device.h>
 #include <linux/err.h>
 #include <linux/init.h>
@@ -18,6 +19,7 @@
 #include <linux/slab.h>
 #include <linux/thermal.h>
 #include <linux/types.h>
+#include <linux/uaccess.h>
 
 #define EVX_NAME "evonix_cos_power_compat"
 
@@ -28,6 +30,9 @@ static struct device *oplus_usb_dev;
 static struct proc_dir_entry *proc_charger_dir;
 static struct proc_dir_entry *proc_input_current_now;
 static struct proc_dir_entry *proc_shell_temp;
+
+static atomic64_t shell_temp_write_count;
+static char shell_temp_last_payload[64];
 
 static int evx_psy_get_int(const char *psy_name,
 			   enum power_supply_property psp,
@@ -301,12 +306,34 @@ static int shell_temp_proc_show(struct seq_file *m, void *v)
 	return 0;
 }
 
+static ssize_t shell_temp_proc_write(struct file *file,
+				    const char __user *buf,
+				    size_t count, loff_t *ppos)
+{
+	size_t len;
+
+	len = min(count, sizeof(shell_temp_last_payload) - 1);
+	if (copy_from_user(shell_temp_last_payload, buf, len))
+		return -EFAULT;
+
+	shell_temp_last_payload[len] = '\0';
+	atomic64_inc(&shell_temp_write_count);
+
+	/*
+	 * Horae writes here as a control/refresh action.
+	 * Read path still returns real thermal value; write path records the
+	 * real userspace request and accepts it instead of returning EIO.
+	 */
+	return count;
+}
+
 static int shell_temp_proc_open(struct inode *inode, struct file *file)
 {
 	return single_open(file, shell_temp_proc_show, NULL);
 }
 
 static const struct proc_ops shell_temp_proc_ops = {
+	.proc_write	= shell_temp_proc_write,
 	.proc_open	= shell_temp_proc_open,
 	.proc_read	= seq_read,
 	.proc_lseek	= seq_lseek,

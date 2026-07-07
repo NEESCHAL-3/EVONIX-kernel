@@ -39,6 +39,12 @@ static struct proc_dir_entry *proc_oplus_scheduler_dir;
 static struct proc_dir_entry *proc_sched_assist_dir;
 static struct proc_dir_entry *proc_sched_assist_scene;
 
+static struct proc_dir_entry *proc_oplus_storage_dir;
+static struct proc_dir_entry *proc_io_metrics_dir;
+static struct proc_dir_entry *proc_io_metrics_forever_dir;
+static struct proc_dir_entry *proc_ufs_total_read_size_mb;
+static struct proc_dir_entry *proc_ufs_total_write_size_mb;
+
 static atomic_t sched_assist_scene = ATOMIC_INIT(0);
 
 #define EVX_REAL_UFS_WB_ON "/sys/devices/platform/soc/112b0000.ufshci/wb_on"
@@ -152,6 +158,81 @@ static const struct proc_ops sched_assist_scene_proc_ops = {
 	.proc_open	= sched_assist_scene_proc_open,
 	.proc_read	= seq_read,
 	.proc_write	= sched_assist_scene_proc_write,
+	.proc_lseek	= seq_lseek,
+	.proc_release	= single_release,
+};
+
+static int evx_get_sdc_stat_sectors(u64 *read_sectors, u64 *write_sectors)
+{
+	char buf[256];
+	ssize_t ret;
+	u64 rd_ios, rd_merges, rd_sectors, rd_ticks;
+	u64 wr_ios, wr_merges, wr_sectors;
+
+	ret = evx_read_real_sysfs("/sys/block/sdc/stat", buf, sizeof(buf));
+	if (ret < 0)
+		return ret;
+
+	if (sscanf(buf, "%llu %llu %llu %llu %llu %llu %llu",
+		   &rd_ios, &rd_merges, &rd_sectors, &rd_ticks,
+		   &wr_ios, &wr_merges, &wr_sectors) != 7)
+		return -EINVAL;
+
+	*read_sectors = rd_sectors;
+	*write_sectors = wr_sectors;
+	return 0;
+}
+
+static int ufs_total_read_size_mb_proc_show(struct seq_file *m, void *v)
+{
+	u64 read_sectors = 0;
+	u64 write_sectors = 0;
+	int ret;
+
+	ret = evx_get_sdc_stat_sectors(&read_sectors, &write_sectors);
+	if (ret)
+		return ret;
+
+	/* Linux block stat sectors are 512 bytes. MB = sectors / 2048. */
+	seq_printf(m, "%llu\n", (unsigned long long)(read_sectors >> 11));
+	return 0;
+}
+
+static int ufs_total_write_size_mb_proc_show(struct seq_file *m, void *v)
+{
+	u64 read_sectors = 0;
+	u64 write_sectors = 0;
+	int ret;
+
+	ret = evx_get_sdc_stat_sectors(&read_sectors, &write_sectors);
+	if (ret)
+		return ret;
+
+	/* Linux block stat sectors are 512 bytes. MB = sectors / 2048. */
+	seq_printf(m, "%llu\n", (unsigned long long)(write_sectors >> 11));
+	return 0;
+}
+
+static int ufs_total_read_size_mb_proc_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, ufs_total_read_size_mb_proc_show, NULL);
+}
+
+static int ufs_total_write_size_mb_proc_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, ufs_total_write_size_mb_proc_show, NULL);
+}
+
+static const struct proc_ops ufs_total_read_size_mb_proc_ops = {
+	.proc_open	= ufs_total_read_size_mb_proc_open,
+	.proc_read	= seq_read,
+	.proc_lseek	= seq_lseek,
+	.proc_release	= single_release,
+};
+
+static const struct proc_ops ufs_total_write_size_mb_proc_ops = {
+	.proc_open	= ufs_total_write_size_mb_proc_open,
+	.proc_read	= seq_read,
 	.proc_lseek	= seq_lseek,
 	.proc_release	= single_release,
 };
@@ -280,6 +361,26 @@ static int __init evx_cos_perf_compat_init(void)
 		pr_warn(EVX_PERF_NAME ": UFS platform device 112b0000.ufshci not found\n");
 	}
 
+	proc_oplus_storage_dir = proc_mkdir("oplus_storage", NULL);
+	if (proc_oplus_storage_dir) {
+		proc_io_metrics_dir = proc_mkdir("io_metrics",
+						  proc_oplus_storage_dir);
+		if (proc_io_metrics_dir) {
+			proc_io_metrics_forever_dir =
+				proc_mkdir("forever", proc_io_metrics_dir);
+			if (proc_io_metrics_forever_dir) {
+				proc_ufs_total_read_size_mb =
+					proc_create("ufs_total_read_size_mb", 0444,
+						    proc_io_metrics_forever_dir,
+						    &ufs_total_read_size_mb_proc_ops);
+				proc_ufs_total_write_size_mb =
+					proc_create("ufs_total_write_size_mb", 0444,
+						    proc_io_metrics_forever_dir,
+						    &ufs_total_write_size_mb_proc_ops);
+			}
+		}
+	}
+
 	proc_oplus_scheduler_dir = proc_mkdir("oplus_scheduler", NULL);
 	if (proc_oplus_scheduler_dir) {
 		proc_sched_assist_dir = proc_mkdir("sched_assist",
@@ -305,6 +406,17 @@ err_task_cpustats:
 
 static void __exit evx_cos_perf_compat_exit(void)
 {
+	if (proc_ufs_total_read_size_mb)
+		proc_remove(proc_ufs_total_read_size_mb);
+	if (proc_ufs_total_write_size_mb)
+		proc_remove(proc_ufs_total_write_size_mb);
+	if (proc_io_metrics_forever_dir)
+		proc_remove(proc_io_metrics_forever_dir);
+	if (proc_io_metrics_dir)
+		proc_remove(proc_io_metrics_dir);
+	if (proc_oplus_storage_dir)
+		proc_remove(proc_oplus_storage_dir);
+
 	if (proc_sched_assist_scene)
 		proc_remove(proc_sched_assist_scene);
 	if (proc_sched_assist_dir)
