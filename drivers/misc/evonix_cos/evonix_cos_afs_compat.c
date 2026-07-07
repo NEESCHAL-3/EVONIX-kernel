@@ -19,6 +19,9 @@ static struct proc_dir_entry *evx_afs_dir;
 static char evx_afs_buf[EVX_AFS_MAX_BUF];
 static size_t evx_afs_len;
 static unsigned long evx_afs_writes;
+static unsigned long evx_afs_ioctls;
+static unsigned int evx_afs_last_cmd;
+static unsigned long evx_afs_last_arg;
 static int evx_afs_enable = 1;
 static DEFINE_MUTEX(evx_afs_lock);
 
@@ -74,10 +77,32 @@ static ssize_t evx_afs_config_write(struct file *file,
         return count;
 }
 
+
+static long evx_afs_config_ioctl(struct file *file,
+                                 unsigned int cmd, unsigned long arg)
+{
+        /*
+         * OPlus afsConfig.so uses ioctl on /proc/oplus_afs_config/afs_config
+         * for scene lookup, observed command 0x7102.
+         * Accept the request so the native side does not fail with ENOTTY.
+         */
+        mutex_lock(&evx_afs_lock);
+        evx_afs_ioctls++;
+        evx_afs_last_cmd = cmd;
+        evx_afs_last_arg = arg;
+        mutex_unlock(&evx_afs_lock);
+
+        return 0;
+}
+
 static const struct proc_ops evx_afs_config_fops = {
         .proc_open      = evx_afs_config_open,
         .proc_read      = seq_read,
         .proc_write     = evx_afs_config_write,
+        .proc_ioctl     = evx_afs_config_ioctl,
+#ifdef CONFIG_COMPAT
+        .proc_compat_ioctl = evx_afs_config_ioctl,
+#endif
         .proc_lseek     = seq_lseek,
         .proc_release   = single_release,
 };
@@ -122,6 +147,30 @@ static const struct proc_ops evx_afs_enable_fops = {
         .proc_release   = single_release,
 };
 
+
+static int evx_afs_debug_show(struct seq_file *m, void *v)
+{
+        mutex_lock(&evx_afs_lock);
+        seq_printf(m,
+                   "enable=%d writes=%lu ioctls=%lu last_cmd=0x%x last_arg=0x%lx len=%zu\n",
+                   evx_afs_enable, evx_afs_writes, evx_afs_ioctls,
+                   evx_afs_last_cmd, evx_afs_last_arg, evx_afs_len);
+        mutex_unlock(&evx_afs_lock);
+        return 0;
+}
+
+static int evx_afs_debug_open(struct inode *inode, struct file *file)
+{
+        return single_open(file, evx_afs_debug_show, NULL);
+}
+
+static const struct proc_ops evx_afs_debug_fops = {
+        .proc_open      = evx_afs_debug_open,
+        .proc_read      = seq_read,
+        .proc_lseek     = seq_lseek,
+        .proc_release   = single_release,
+};
+
 static int __init evx_cos_afs_compat_init(void)
 {
         evx_afs_dir = proc_mkdir("oplus_afs_config", NULL);
@@ -130,6 +179,7 @@ static int __init evx_cos_afs_compat_init(void)
 
         proc_create("afs_config", 0666, evx_afs_dir, &evx_afs_config_fops);
         proc_create("afs_enable", 0666, evx_afs_dir, &evx_afs_enable_fops);
+        proc_create("afs_debug", 0444, evx_afs_dir, &evx_afs_debug_fops);
 
         pr_info("evonix_cos_afs: AFS binary proc compat ready\n");
         return 0;
