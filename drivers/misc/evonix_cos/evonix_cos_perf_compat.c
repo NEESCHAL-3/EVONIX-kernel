@@ -42,6 +42,8 @@ static struct proc_dir_entry *proc_sched_assist_im_flag;
 static struct proc_dir_entry *proc_theia_pwk_report;
 static struct proc_dir_entry *proc_swpm_dir;
 static struct proc_dir_entry *proc_swpm_sp_ddr_idx;
+static struct proc_dir_entry *proc_oplus_version_dir;
+static struct proc_dir_entry *proc_oplus_eng_version;
 
 static struct proc_dir_entry *proc_oplus_storage_dir;
 static struct proc_dir_entry *proc_io_metrics_dir;
@@ -53,6 +55,7 @@ static atomic_t sched_assist_scene = ATOMIC_INIT(0);
 static atomic_t sched_assist_im_flag = ATOMIC_INIT(0);
 static atomic64_t theia_pwk_report_count;
 static char theia_pwk_last_payload[128];
+static atomic_t oplus_eng_version = ATOMIC_INIT(0);
 
 #define EVX_REAL_UFS_WB_ON "/sys/devices/platform/soc/112b0000.ufshci/wb_on"
 
@@ -386,6 +389,50 @@ static const struct proc_ops theia_pwk_report_proc_ops = {
 	.proc_release	= single_release,
 };
 
+static int oplus_eng_version_proc_show(struct seq_file *m, void *v)
+{
+	/*
+	 * OPlus stability service reads this as an engineering-build flag.
+	 * 0 = normal/user-style build.
+	 */
+	seq_printf(m, "%d\n", atomic_read(&oplus_eng_version));
+	return 0;
+}
+
+static int oplus_eng_version_proc_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, oplus_eng_version_proc_show, NULL);
+}
+
+static ssize_t oplus_eng_version_proc_write(struct file *file,
+					    const char __user *buf,
+					    size_t count, loff_t *ppos)
+{
+	char kbuf[32];
+	int val;
+
+	if (count >= sizeof(kbuf))
+		count = sizeof(kbuf) - 1;
+
+	if (copy_from_user(kbuf, buf, count))
+		return -EFAULT;
+
+	kbuf[count] = '\0';
+
+	if (!kstrtoint(kbuf, 0, &val))
+		atomic_set(&oplus_eng_version, val);
+
+	return count;
+}
+
+static const struct proc_ops oplus_eng_version_proc_ops = {
+	.proc_open	= oplus_eng_version_proc_open,
+	.proc_read	= seq_read,
+	.proc_write	= oplus_eng_version_proc_write,
+	.proc_lseek	= seq_lseek,
+	.proc_release	= single_release,
+};
+
 static int task_cpustats_proc_show(struct seq_file *m, void *v)
 {
 	struct task_struct *g;
@@ -545,6 +592,13 @@ static int __init evx_cos_perf_compat_init(void)
 		proc_create("theiaPwkReport", 0666, NULL,
 			    &theia_pwk_report_proc_ops);
 
+	proc_oplus_version_dir = proc_mkdir("oplusVersion", NULL);
+	if (proc_oplus_version_dir)
+		proc_oplus_eng_version =
+			proc_create("engVersion", 0666,
+				    proc_oplus_version_dir,
+				    &oplus_eng_version_proc_ops);
+
 	proc_oplus_scheduler_dir = proc_mkdir("oplus_scheduler", NULL);
 	if (proc_oplus_scheduler_dir) {
 		proc_sched_assist_dir = proc_mkdir("sched_assist",
@@ -575,6 +629,11 @@ err_task_cpustats:
 
 static void __exit evx_cos_perf_compat_exit(void)
 {
+	if (proc_oplus_eng_version)
+		proc_remove(proc_oplus_eng_version);
+	if (proc_oplus_version_dir)
+		proc_remove(proc_oplus_version_dir);
+
 	if (proc_theia_pwk_report)
 		proc_remove(proc_theia_pwk_report);
 	if (proc_swpm_sp_ddr_idx)

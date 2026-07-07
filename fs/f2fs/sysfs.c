@@ -1165,7 +1165,10 @@ DCC_INFO_GENERAL_RW_ATTR(mid_discard_issue_time);
 DCC_INFO_GENERAL_RW_ATTR(max_discard_issue_time);
 DCC_INFO_GENERAL_RW_ATTR(discard_io_aware_gran);
 DCC_INFO_GENERAL_RW_ATTR(discard_urgent_util);
-DCC_INFO_GENERAL_RW_ATTR(discard_granularity);
+F2FS_ATTR_OFFSET(DCC_INFO, discard_granularity, 0666,
+		f2fs_sbi_show, f2fs_sbi_store,
+		offsetof(struct discard_cmd_control, discard_granularity),
+		sizeof(((struct discard_cmd_control *)0)->discard_granularity));
 DCC_INFO_GENERAL_RW_ATTR(max_ordered_discard);
 DCC_INFO_GENERAL_RW_ATTR(discard_io_aware);
 
@@ -1178,7 +1181,10 @@ NM_INFO_GENERAL_RW_ATTR(dirty_nats_ratio);
 /* F2FS_SBI ATTR */
 F2FS_RW_ATTR(F2FS_SBI, f2fs_super_block, extension_list, extension_list);
 F2FS_SBI_RW_ATTR(gc_idle, gc_mode);
-F2FS_SBI_RW_ATTR(gc_urgent, gc_mode);
+F2FS_ATTR_OFFSET(F2FS_SBI, gc_urgent, 0666,
+		f2fs_sbi_show, f2fs_sbi_store,
+		offsetof(struct f2fs_sb_info, gc_mode),
+		sizeof(((struct f2fs_sb_info *)0)->gc_mode));
 F2FS_SBI_RW_ATTR(cp_interval, interval_time[CP_TIME]);
 F2FS_SBI_RW_ATTR(idle_interval, interval_time[REQ_TIME]);
 F2FS_SBI_RW_ATTR(discard_idle_interval, interval_time[DISCARD_TIME]);
