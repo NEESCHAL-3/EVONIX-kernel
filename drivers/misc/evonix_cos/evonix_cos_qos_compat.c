@@ -30,10 +30,14 @@ static DEFINE_MUTEX(evx_qos_level_lock);
 static char evx_qos_lut_buf[EVX_QOS_MAX_BUF];
 static size_t evx_qos_lut_len;
 static unsigned long evx_qos_lut_writes;
+static unsigned long evx_qos_lut_ioctls;
+static unsigned int evx_qos_lut_last_cmd;
 
 static char evx_qos_level_buf[EVX_QOS_MAX_BUF];
 static size_t evx_qos_level_len;
 static unsigned long evx_qos_level_writes;
+static unsigned long evx_qos_level_ioctls;
+static unsigned int evx_qos_level_last_cmd;
 
 static ssize_t evx_qos_copy_from_user(char *dst, size_t *dst_len,
 				      const char __user *buf, size_t count)
@@ -59,8 +63,9 @@ static ssize_t evx_qos_copy_from_user(char *dst, size_t *dst_len,
 static int evx_qos_lut_show(struct seq_file *m, void *v)
 {
 	mutex_lock(&evx_qos_lut_lock);
-	seq_printf(m, "writes=%lu len=%zu\n", evx_qos_lut_writes,
-		   evx_qos_lut_len);
+	seq_printf(m, "writes=%lu ioctls=%lu last_cmd=%u len=%zu\n",
+		   evx_qos_lut_writes, evx_qos_lut_ioctls,
+		   evx_qos_lut_last_cmd, evx_qos_lut_len);
 	if (evx_qos_lut_len)
 		seq_write(m, evx_qos_lut_buf, evx_qos_lut_len);
 	seq_putc(m, '\n');
@@ -86,8 +91,9 @@ static ssize_t evx_qos_lut_write(struct file *file, const char __user *buf,
 static int evx_qos_level_show(struct seq_file *m, void *v)
 {
 	mutex_lock(&evx_qos_level_lock);
-	seq_printf(m, "writes=%lu len=%zu\n", evx_qos_level_writes,
-		   evx_qos_level_len);
+	seq_printf(m, "writes=%lu ioctls=%lu last_cmd=%u len=%zu\n",
+		   evx_qos_level_writes, evx_qos_level_ioctls,
+		   evx_qos_level_last_cmd, evx_qos_level_len);
 	if (evx_qos_level_len)
 		seq_write(m, evx_qos_level_buf, evx_qos_level_len);
 	seq_putc(m, '\n');
@@ -120,10 +126,37 @@ static int evx_qos_level_open(struct inode *inode, struct file *file)
 	return single_open(file, evx_qos_level_show, NULL);
 }
 
+
+static long evx_qos_lut_ioctl(struct file *file,
+                              unsigned int cmd, unsigned long arg)
+{
+        mutex_lock(&evx_qos_lut_lock);
+        evx_qos_lut_ioctls++;
+        evx_qos_lut_last_cmd = cmd;
+        mutex_unlock(&evx_qos_lut_lock);
+
+        return 0;
+}
+
+static long evx_qos_level_ioctl(struct file *file,
+                                unsigned int cmd, unsigned long arg)
+{
+        mutex_lock(&evx_qos_level_lock);
+        evx_qos_level_ioctls++;
+        evx_qos_level_last_cmd = cmd;
+        mutex_unlock(&evx_qos_level_lock);
+
+        return 0;
+}
+
 static const struct proc_ops evx_qos_lut_fops = {
 	.proc_open	= evx_qos_lut_open,
 	.proc_read	= seq_read,
 	.proc_write	= evx_qos_lut_write,
+	.proc_ioctl	= evx_qos_lut_ioctl,
+#ifdef CONFIG_COMPAT
+	.proc_compat_ioctl = evx_qos_lut_ioctl,
+#endif
 	.proc_lseek	= seq_lseek,
 	.proc_release	= single_release,
 };
@@ -132,6 +165,10 @@ static const struct proc_ops evx_qos_level_fops = {
 	.proc_open	= evx_qos_level_open,
 	.proc_read	= seq_read,
 	.proc_write	= evx_qos_level_write,
+	.proc_ioctl	= evx_qos_level_ioctl,
+#ifdef CONFIG_COMPAT
+	.proc_compat_ioctl = evx_qos_level_ioctl,
+#endif
 	.proc_lseek	= seq_lseek,
 	.proc_release	= single_release,
 };
