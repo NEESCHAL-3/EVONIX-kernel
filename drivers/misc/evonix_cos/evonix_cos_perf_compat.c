@@ -7,6 +7,7 @@
  */
 
 #include <linux/atomic.h>
+#include <linux/blkdev.h>
 #include <linux/device.h>
 #include <linux/fs.h>
 #include <linux/platform_device.h>
@@ -35,6 +36,7 @@ static u64 watchdog_last_kick_ns;
 static char watchdog_last_payload[64];
 
 static struct device *evx_ufs_dev;
+static struct device *evx_zram0_dev;
 static struct platform_device *evx_bootdevice_pdev;
 static struct proc_dir_entry *proc_devinfo_dir;
 static struct proc_dir_entry *proc_devinfo_ufsplus_status;
@@ -43,6 +45,10 @@ static struct proc_dir_entry *proc_ufs_signal_record_upload;
 static struct proc_dir_entry *proc_oplus_qos_dir;
 static struct proc_dir_entry *proc_oplus_qos_enable;
 static struct proc_dir_entry *proc_sched_assist_qos_enable;
+static struct proc_dir_entry *proc_sched_assist_feature_enable;
+static struct proc_dir_entry *proc_sched_assist_uaf_enable;
+static struct proc_dir_entry *proc_sched_assist_ux_enable;
+static struct proc_dir_entry *proc_sched_assist_enabled;
 static struct proc_dir_entry *proc_oplus_scheduler_qos_enable;
 static struct proc_dir_entry *proc_oplus_binder_dir;
 static struct proc_dir_entry *proc_oplus_binder_ux_flag;
@@ -151,6 +157,29 @@ static DEVICE_ATTR_RW(virtualtlcbuff);
  * This stores the real scene written/read by userspace. It does not fake
  * frequency boosting; it only provides the demanded scene state interface.
  */
+static int evx_device_match_name(struct device *dev, const void *data)
+{
+	return !strcmp(dev_name(dev), data);
+}
+
+static ssize_t hybridswap_swapd_pause_compat_show(struct device *dev,
+						  struct device_attribute *attr,
+						  char *buf)
+{
+	return sysfs_emit(buf, "0\n");
+}
+
+static ssize_t hybridswap_swapd_pause_compat_store(struct device *dev,
+						   struct device_attribute *attr,
+						   const char *buf, size_t count)
+{
+	return count;
+}
+
+static DEVICE_ATTR(hybridswap_swapd_pause, 0664,
+		       hybridswap_swapd_pause_compat_show,
+		       hybridswap_swapd_pause_compat_store);
+
 static int oplus_qos_enable_proc_show(struct seq_file *m, void *v)
 {
 	seq_printf(m, "%d\n", atomic_read(&oplus_qos_enable));
@@ -824,6 +853,18 @@ static int __init evx_cos_perf_compat_init(void)
 		proc_create("theiaPwkReport", 0666, NULL,
 			    &theia_pwk_report_proc_ops);
 
+		evx_zram0_dev = class_find_device(&block_class, NULL, "zram0",
+					    evx_device_match_name);
+	if (evx_zram0_dev) {
+		ret = device_create_file(evx_zram0_dev,
+					 &dev_attr_hybridswap_swapd_pause);
+		if (ret && ret != -EEXIST)
+			pr_warn(EVX_PERF_NAME ": zram0 hybridswap pause create failed: %d\n",
+				ret);
+	} else {
+		pr_warn(EVX_PERF_NAME ": zram0 device not found for hybridswap pause\n");
+	}
+
 	evx_bootdevice_pdev =
 		platform_device_register_simple("bootdevice", -1, NULL, 0);
 	if (!IS_ERR(evx_bootdevice_pdev)) {
@@ -899,6 +940,22 @@ static int __init evx_cos_perf_compat_init(void)
 				proc_create("qos_enable", 0666,
 					    proc_sched_assist_dir,
 					    &oplus_qos_enable_proc_ops);
+			proc_sched_assist_enabled =
+				proc_create("sched_assist_enabled", 0666,
+					    proc_sched_assist_dir,
+					    &oplus_qos_enable_proc_ops);
+			proc_sched_assist_ux_enable =
+				proc_create("ux_enable", 0666,
+					    proc_sched_assist_dir,
+					    &oplus_qos_enable_proc_ops);
+			proc_sched_assist_uaf_enable =
+				proc_create("uaf_enable", 0666,
+					    proc_sched_assist_dir,
+					    &oplus_qos_enable_proc_ops);
+			proc_sched_assist_feature_enable =
+				proc_create("feature_enable", 0666,
+					    proc_sched_assist_dir,
+					    &oplus_qos_enable_proc_ops);
 		}
 	}
 
@@ -916,6 +973,14 @@ err_task_cpustats:
 
 static void __exit evx_cos_perf_compat_exit(void)
 {
+	if (proc_sched_assist_feature_enable)
+		proc_remove(proc_sched_assist_feature_enable);
+	if (proc_sched_assist_uaf_enable)
+		proc_remove(proc_sched_assist_uaf_enable);
+	if (proc_sched_assist_ux_enable)
+		proc_remove(proc_sched_assist_ux_enable);
+	if (proc_sched_assist_enabled)
+		proc_remove(proc_sched_assist_enabled);
 	if (proc_sched_assist_qos_enable)
 		proc_remove(proc_sched_assist_qos_enable);
 	if (proc_oplus_scheduler_qos_enable)
@@ -933,6 +998,13 @@ static void __exit evx_cos_perf_compat_exit(void)
 		proc_remove(proc_devinfo_ufsplus_status);
 	if (proc_devinfo_dir)
 		proc_remove(proc_devinfo_dir);
+
+	if (evx_zram0_dev) {
+		device_remove_file(evx_zram0_dev,
+				   &dev_attr_hybridswap_swapd_pause);
+		put_device(evx_zram0_dev);
+		evx_zram0_dev = NULL;
+	}
 
 	if (evx_bootdevice_pdev) {
 		device_remove_file(&evx_bootdevice_pdev->dev,

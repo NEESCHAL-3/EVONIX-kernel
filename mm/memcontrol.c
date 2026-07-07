@@ -5151,7 +5151,35 @@ static int mem_cgroup_slab_show(struct seq_file *m, void *p)
 
 static int memory_stat_show(struct seq_file *m, void *v);
 
+static int mem_cgroup_name_seq_show(struct seq_file *m, void *v)
+{
+	struct cgroup_subsys_state *css = seq_css(m);
+	char name[128] = { };
+
+	if (css && css->cgroup)
+		cgroup_name(css->cgroup, name, sizeof(name));
+
+	seq_printf(m, "%s\n", name);
+	return 0;
+}
+
+static ssize_t mem_cgroup_name_write(struct kernfs_open_file *of,
+				     char *buf, size_t nbytes, loff_t off)
+{
+	/*
+	 * ColorOS MemoryOperationUtils writes memory.name after creating
+	 * /dev/memcg/apps/<package>. Linux memcg does not need this value,
+	 * so accept the write as metadata compatibility.
+	 */
+	return nbytes;
+}
+
 static struct cftype mem_cgroup_legacy_files[] = {
+	{
+		.name = "name",
+		.seq_show = mem_cgroup_name_seq_show,
+		.write = mem_cgroup_name_write,
+	},
 	{
 		.name = "usage_in_bytes",
 		.private = MEMFILE_PRIVATE(_MEM, RES_USAGE),
