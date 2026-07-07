@@ -370,7 +370,7 @@ static int __init evx_cos_power_compat_init(void)
 		goto err_remove_proc_charger;
 	}
 
-	proc_shell_temp = proc_create("shell-temp", 0444, NULL,
+	proc_shell_temp = proc_create("shell-temp", 0666, NULL,
 				      &shell_temp_proc_ops);
 	if (!proc_shell_temp) {
 		ret = -ENOMEM;
