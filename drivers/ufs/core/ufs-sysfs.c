@@ -337,6 +337,26 @@ static DEVICE_ATTR_RO(spm_target_dev_state);
 static DEVICE_ATTR_RO(spm_target_link_state);
 static DEVICE_ATTR_RW(auto_hibern8);
 static DEVICE_ATTR_RW(wb_on);
+
+/*
+ * EVONIX-COS / OPlus compatibility:
+ * ColorOS PerformanceService checks virtualtlcbuff under the real UFS device.
+ * Map it to the existing real UFS WriteBooster wb_on sysfs backend.
+ */
+static ssize_t virtualtlcbuff_show(struct device *dev,
+				   struct device_attribute *attr, char *buf)
+{
+	return wb_on_show(dev, attr, buf);
+}
+
+static ssize_t virtualtlcbuff_store(struct device *dev,
+				    struct device_attribute *attr,
+				    const char *buf, size_t count)
+{
+	return wb_on_store(dev, attr, buf, count);
+}
+
+static DEVICE_ATTR_RW(virtualtlcbuff);
 static DEVICE_ATTR_RW(enable_wb_buf_flush);
 static DEVICE_ATTR_RW(wb_flush_threshold);
 
@@ -349,6 +369,7 @@ static struct attribute *ufs_sysfs_ufshcd_attrs[] = {
 	&dev_attr_spm_target_link_state.attr,
 	&dev_attr_auto_hibern8.attr,
 	&dev_attr_wb_on.attr,
+	&dev_attr_virtualtlcbuff.attr,
 	&dev_attr_enable_wb_buf_flush.attr,
 	&dev_attr_wb_flush_threshold.attr,
 	NULL
