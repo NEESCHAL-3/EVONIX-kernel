@@ -2,7 +2,10 @@
 #ifndef _EVONIX_RODIN_INTERNAL_H
 #define _EVONIX_RODIN_INTERNAL_H
 
+#include <linux/notifier.h>
 #include <linux/types.h>
+
+struct proc_dir_entry;
 
 enum evx_rodin_state {
 	EVX_RODIN_IDLE = 0,
@@ -15,7 +18,13 @@ enum evx_rodin_state {
 
 void evx_rodin_request_state(enum evx_rodin_state state,
 			     unsigned int hold_ms);
+
 enum evx_rodin_state evx_rodin_get_state(void);
 unsigned int evx_rodin_get_thermal_pressure_pct(void);
+
+int evx_rodin_register_state_notifier(struct notifier_block *nb);
+int evx_rodin_unregister_state_notifier(struct notifier_block *nb);
+
+struct proc_dir_entry *evx_rodin_get_proc_dir(void);
 
 #endif
