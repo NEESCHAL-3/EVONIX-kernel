@@ -569,6 +569,19 @@ static inline bool elv_support_iosched(struct request_queue *q)
  */
 static struct elevator_type *elevator_get_default(struct request_queue *q)
 {
+	struct elevator_type *e;
+
+	/*
+	 * An explicit device-driver preference takes priority over the generic
+	 * no-scheduler-by-default policy. If Kyber is unavailable, continue
+	 * through the normal Linux fallback path.
+	 */
+	if (test_bit(QUEUE_FLAG_PREFER_KYBER, &q->queue_flags)) {
+		e = elevator_find_get(q, "kyber");
+		if (e)
+			return e;
+	}
+
 	if (q->tag_set->flags & BLK_MQ_F_NO_SCHED_BY_DEFAULT)
 		return NULL;
 
