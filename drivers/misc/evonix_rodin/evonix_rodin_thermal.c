@@ -30,6 +30,7 @@
 #define EVX_THERMAL_REFRESH_MS		30000U
 #define EVX_THERMAL_RETRY_MS		500U
 #define EVX_THERMAL_MAX_RETRIES		40U
+#define EVX_THERMAL_EVENT_MIN_MS	2000U
 #define EVX_THERMAL_RELEASE_DWELL_MS	20000U
 
 /* POWER_SUPPLY_PROP_TEMP is reported in tenths of one degree Celsius. */
@@ -132,10 +133,15 @@ static int evx_battery_temp_deci_c;
 static int evx_last_temp_error;
 static bool evx_high_performance;
 static bool evx_domains_ready;
+static bool evx_psy_notifier_registered;
+static unsigned long evx_last_temp_sample_jiffies;
 
 static void evx_thermal_workfn(struct work_struct *work);
+static void evx_thermal_apply_workfn(struct work_struct *work);
 
 static DECLARE_DELAYED_WORK(evx_thermal_work, evx_thermal_workfn);
+static DECLARE_WORK(evx_thermal_apply_work,
+		    evx_thermal_apply_workfn);
 
 static const char *evx_thermal_level_name(enum evx_thermal_level level)
 {
@@ -391,6 +397,18 @@ static bool evx_apply_maximums_locked(void)
 	return changed;
 }
 
+static void evx_thermal_apply_workfn(struct work_struct *work)
+{
+	bool qos_refresh;
+
+	mutex_lock(&evx_thermal_lock);
+	qos_refresh = evx_apply_maximums_locked();
+	mutex_unlock(&evx_thermal_lock);
+
+	if (qos_refresh)
+		evx_rodin_qos_refresh();
+}
+
 static void evx_thermal_workfn(struct work_struct *work)
 {
 	unsigned long next_delay;
@@ -426,6 +444,7 @@ static void evx_thermal_workfn(struct work_struct *work)
 
 	ret = evx_read_battery_temp(&temp);
 	evx_last_temp_error = ret;
+	WRITE_ONCE(evx_last_temp_sample_jiffies, jiffies);
 
 	if (!ret) {
 		evx_battery_temp_deci_c = temp;
@@ -444,6 +463,24 @@ out_schedule:
 	schedule_delayed_work(&evx_thermal_work, next_delay);
 }
 
+static unsigned long evx_thermal_event_delay(void)
+{
+	unsigned long last;
+	unsigned long next;
+
+	last = READ_ONCE(evx_last_temp_sample_jiffies);
+	if (!last)
+		return 0;
+
+	next = last +
+		msecs_to_jiffies(EVX_THERMAL_EVENT_MIN_MS);
+
+	if (time_before(jiffies, next))
+		return next - jiffies;
+
+	return 0;
+}
+
 static int evx_power_supply_changed(struct notifier_block *nb,
 				    unsigned long event,
 				    void *data)
@@ -457,13 +494,25 @@ static int evx_power_supply_changed(struct notifier_block *nb,
 	if (strcmp(psy->desc->name, "battery"))
 		return NOTIFY_OK;
 
-	mod_delayed_work(system_wq, &evx_thermal_work, 0);
+	mod_delayed_work(system_wq, &evx_thermal_work,
+			 evx_thermal_event_delay());
 	return NOTIFY_OK;
 }
 
 static struct notifier_block evx_power_supply_notifier = {
 	.notifier_call = evx_power_supply_changed,
 };
+
+static void evx_unregister_power_supply_notifier(void)
+{
+	if (!evx_psy_notifier_registered)
+		return;
+
+	power_supply_unreg_notifier(
+		&evx_power_supply_notifier);
+	evx_psy_notifier_registered = false;
+}
+
 
 static int evx_load_tier_changed(struct notifier_block *nb,
 				 unsigned long tier,
@@ -473,7 +522,7 @@ static int evx_load_tier_changed(struct notifier_block *nb,
 	 * The load notifier is atomic. Apply frequency QoS changes later from
 	 * process context instead of touching constraints inside the callback.
 	 */
-	mod_delayed_work(system_wq, &evx_thermal_work, 0);
+	schedule_work(&evx_thermal_apply_work);
 	return NOTIFY_OK;
 }
 
@@ -491,7 +540,7 @@ static int evx_workload_state_changed(struct notifier_block *nb,
 	 * active frames retain their minimum frequency while thermal caps
 	 * tighten again immediately after the workload decays.
 	 */
-	mod_delayed_work(system_wq, &evx_thermal_work, 0);
+	schedule_work(&evx_thermal_apply_work);
 	return NOTIFY_OK;
 }
 
@@ -559,7 +608,7 @@ static ssize_t evx_mode_write(struct file *file,
 
 	mutex_unlock(&evx_thermal_lock);
 
-	mod_delayed_work(system_wq, &evx_thermal_work, 0);
+	schedule_work(&evx_thermal_apply_work);
 	return count;
 }
 
@@ -647,15 +696,17 @@ static int __init evx_thermal_init(void)
 
 	ret = power_supply_reg_notifier(
 		&evx_power_supply_notifier);
-	if (ret)
+	if (ret) {
 		pr_warn(EVX_THERMAL_NAME
 			": battery notifier unavailable: %d\n", ret);
+	} else {
+		evx_psy_notifier_registered = true;
+	}
 
 	ret = evx_rodin_register_load_notifier(
 		&evx_load_notifier);
 	if (ret) {
-		power_supply_unreg_notifier(
-			&evx_power_supply_notifier);
+		evx_unregister_power_supply_notifier();
 		return ret;
 	}
 
@@ -664,8 +715,7 @@ static int __init evx_thermal_init(void)
 	if (ret) {
 		evx_rodin_unregister_load_notifier(
 			&evx_load_notifier);
-		power_supply_unreg_notifier(
-			&evx_power_supply_notifier);
+		evx_unregister_power_supply_notifier();
 		return ret;
 	}
 
@@ -697,10 +747,10 @@ static void __exit evx_thermal_exit(void)
 		&evx_workload_notifier);
 	evx_rodin_unregister_load_notifier(
 		&evx_load_notifier);
-	power_supply_unreg_notifier(
-		&evx_power_supply_notifier);
+	evx_unregister_power_supply_notifier();
 
 	cancel_delayed_work_sync(&evx_thermal_work);
+	cancel_work_sync(&evx_thermal_apply_work);
 
 	if (evx_mode_proc)
 		proc_remove(evx_mode_proc);
