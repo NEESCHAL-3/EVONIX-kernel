@@ -15,6 +15,13 @@ enum evx_rodin_state {
 	EVX_RODIN_STATE_MAX,
 };
 
+enum evx_rodin_load_tier {
+	EVX_RODIN_LOAD_LIGHT = 0,
+	EVX_RODIN_LOAD_MODERATE,
+	EVX_RODIN_LOAD_HEAVY,
+	EVX_RODIN_LOAD_TIER_MAX,
+};
+
 void evx_rodin_request_state(enum evx_rodin_state state,
 			     unsigned int hold_ms);
 
@@ -25,5 +32,11 @@ int evx_rodin_register_state_notifier(struct notifier_block *nb);
 int evx_rodin_unregister_state_notifier(struct notifier_block *nb);
 
 struct proc_dir_entry *evx_rodin_get_proc_dir(void);
+void evx_rodin_qos_refresh(void);
+
+enum evx_rodin_load_tier evx_rodin_get_load_tier(void);
+
+int evx_rodin_register_load_notifier(struct notifier_block *nb);
+int evx_rodin_unregister_load_notifier(struct notifier_block *nb);
 
 #endif

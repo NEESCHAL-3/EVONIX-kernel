@@ -164,6 +164,11 @@ static int evx_qos_state_changed(struct notifier_block *nb,
 	return NOTIFY_OK;
 }
 
+void evx_rodin_qos_refresh(void)
+{
+	schedule_work(&evx_qos_apply_work);
+}
+
 static struct notifier_block evx_qos_state_notifier = {
 	.notifier_call = evx_qos_state_changed,
 };
