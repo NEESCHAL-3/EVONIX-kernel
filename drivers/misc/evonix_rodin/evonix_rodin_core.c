@@ -43,7 +43,6 @@ static const char * const evx_state_names[EVX_RODIN_STATE_MAX] = {
 	[EVX_RODIN_INTERACTIVE] = "INTERACTIVE",
 	[EVX_RODIN_SUSTAINED] = "SUSTAINED",
 	[EVX_RODIN_FRAME_PRESSURE] = "FRAME_PRESSURE",
-	[EVX_RODIN_THERMAL_GUARD] = "THERMAL_GUARD",
 };
 
 static void evx_state_decay_workfn(struct work_struct *work);

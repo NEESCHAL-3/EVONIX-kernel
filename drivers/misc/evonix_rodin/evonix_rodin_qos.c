@@ -70,9 +70,6 @@ evx_state_min_khz[EVX_RODIN_STATE_MAX][EVX_QOS_DOMAINS] = {
 	[EVX_RODIN_FRAME_PRESSURE] = {
 		800000, 1600000, 1200000,
 	},
-	[EVX_RODIN_THERMAL_GUARD] = {
-		0, 0, 0,
-	},
 };
 
 static DEFINE_MUTEX(evx_qos_lock);
@@ -88,54 +85,35 @@ static DECLARE_WORK(evx_qos_apply_work, evx_qos_apply_workfn);
 static DECLARE_DELAYED_WORK(evx_qos_retry_work, evx_qos_retry_workfn);
 
 static s32 evx_qos_limit_request(struct evx_qos_domain *domain,
-				 s32 requested_khz,
-				 unsigned int thermal_pressure)
+                                 s32 requested_khz)
 {
-	s32 effective_max;
+        s32 effective_max;
 
-	if (!domain->policy || requested_khz <= 0)
-		return FREQ_QOS_MIN_DEFAULT_VALUE;
+        if (!domain->policy || requested_khz <= 0)
+                return FREQ_QOS_MIN_DEFAULT_VALUE;
 
-	/*
-	 * Back off before vendor thermal policy has to throttle aggressively.
-	 */
-	if (thermal_pressure >= 35)
-		return FREQ_QOS_MIN_DEFAULT_VALUE;
+        requested_khz =
+                clamp_t(s32, requested_khz,
+                        domain->policy->cpuinfo.min_freq,
+                        domain->policy->cpuinfo.max_freq);
 
-	if (thermal_pressure >= 20) {
-		if (domain->cpu == 7)
-			return FREQ_QOS_MIN_DEFAULT_VALUE;
+        /*
+         * Existing maximum constraints always remain authoritative.
+         * Thermal, firmware and ROM maximum limits are never bypassed.
+         */
+        effective_max =
+                freq_qos_read_value(&domain->policy->constraints,
+                                    FREQ_QOS_MAX);
 
-		if (domain->cpu == 4)
-			requested_khz = min_t(s32, requested_khz, 1200000);
+        if (effective_max > 0 && requested_khz > effective_max)
+                requested_khz = effective_max;
 
-		if (domain->cpu == 0)
-			requested_khz = min_t(s32, requested_khz, 600000);
-	}
-
-	requested_khz =
-		clamp_t(s32, requested_khz,
-			domain->policy->cpuinfo.min_freq,
-			domain->policy->cpuinfo.max_freq);
-
-	/*
-	 * Never create a minimum request above an existing effective maximum.
-	 * Thermal and other legitimate maximum constraints remain authoritative.
-	 */
-	effective_max =
-		freq_qos_read_value(&domain->policy->constraints,
-				    FREQ_QOS_MAX);
-
-	if (effective_max > 0 && requested_khz > effective_max)
-		requested_khz = effective_max;
-
-	return requested_khz;
+        return requested_khz;
 }
 
 static void evx_qos_apply_workfn(struct work_struct *work)
 {
 	enum evx_rodin_state state;
-	unsigned int thermal_pressure;
 	int i;
 
 	mutex_lock(&evx_qos_lock);
@@ -144,7 +122,6 @@ static void evx_qos_apply_workfn(struct work_struct *work)
 		goto out_unlock;
 
 	state = evx_rodin_get_state();
-	thermal_pressure = evx_rodin_get_thermal_pressure_pct();
 
 	for (i = 0; i < EVX_QOS_DOMAINS; i++) {
 		struct evx_qos_domain *domain = &evx_domains[i];
@@ -153,8 +130,7 @@ static void evx_qos_apply_workfn(struct work_struct *work)
 		int ret;
 
 		requested = evx_state_min_khz[state][i];
-		target = evx_qos_limit_request(domain, requested,
-					       thermal_pressure);
+		target = evx_qos_limit_request(domain, requested);
 
 		domain->requested_khz = requested;
 
