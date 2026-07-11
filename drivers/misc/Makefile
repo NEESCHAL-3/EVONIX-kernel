@@ -72,3 +72,6 @@ obj-$(CONFIG_PKVM_SMC_FILTER)  += pkvm-smc/
 
 # EVONIX ColorOS compatibility
 obj-y += evonix_cos/
+
+# Evonix Rodin kernel optimizer
+obj-y += evonix_rodin/
