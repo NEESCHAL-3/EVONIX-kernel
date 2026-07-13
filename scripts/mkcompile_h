@@ -3,15 +3,11 @@
 # EVONIX_BUILD_IDENTITY_BEGIN
 #
 # Override Kleaf's reproducible placeholder identity. The timestamp is
-# generated when mkcompile_h actually runs, so every clean release build
-# records its real build date and time.
 KBUILD_BUILD_USER="Neeschal"
 KBUILD_BUILD_HOST="code"
-KBUILD_BUILD_TIMESTAMP="$(LC_ALL=C date)"
 
 export KBUILD_BUILD_USER
 export KBUILD_BUILD_HOST
-export KBUILD_BUILD_TIMESTAMP
 # EVONIX_BUILD_IDENTITY_END
 
 # SPDX-License-Identifier: GPL-2.0
