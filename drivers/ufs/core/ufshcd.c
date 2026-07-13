@@ -5227,14 +5227,6 @@ static int ufshcd_slave_configure(struct scsi_device *sdev)
 	blk_queue_update_dma_pad(q, PRDT_DATA_BYTE_COUNT_PAD - 1);
 
 	/*
-	 * Rodin uses Kyber as the initial scheduler for physical UFS disk
-	 * queues. Device-mapper and other stacked virtual queues remain
-	 * untouched and continue to submit through the physical queue.
-	 */
-	if (sdev->type == TYPE_DISK)
-		blk_queue_flag_set(QUEUE_FLAG_PREFER_KYBER, q);
-
-	/*
 	 * Block runtime-pm until all consumers are added.
 	 * Refer ufshcd_setup_links().
 	 */

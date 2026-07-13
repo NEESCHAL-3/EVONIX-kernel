@@ -31,6 +31,18 @@
 static struct class *oplus_chg_class;
 static struct device *oplus_battery_dev;
 static struct device *oplus_usb_dev;
+static struct device *oplus_common_dev;
+
+#define EVX_XM_FASTCHARGE_MODE_PATH \
+	"/sys/class/power_supply/bms/fastcharge_mode"
+#define EVX_XM_ADAPTING_POWER_PATH \
+	"/sys/class/power_supply/bms/adapting_power"
+#define EVX_XM_QUICK_CHARGE_TYPE_PATH \
+	"/sys/class/power_supply/usb/quick_charge_type"
+#define EVX_XM_PD_TYPE_PATH \
+	"/sys/class/power_supply/usb/pd_type"
+#define EVX_XM_POWER_MAX_PATH \
+	"/sys/class/power_supply/usb/power_max"
 
 #define EVX_BYPASS_INPUT_SUSPEND_PATH "/sys/class/power_supply/battery/input_suspend"
 
@@ -75,6 +87,43 @@ static int evx_psy_get_int(const char *psy_name,
 		return ret;
 
 	*out = val.intval;
+	return 0;
+}
+
+/*
+ * Xiaomi charging attributes are implemented by OEM vendor modules and are
+ * not part of the GKI power_supply_property enum. Read them without writing
+ * to, or taking control of, the Xiaomi charging state machine.
+ */
+static int evx_read_int_file(const char *path, int *out)
+{
+	struct file *filp;
+	char tmp[32];
+	loff_t pos = 0;
+	ssize_t n;
+	int ret;
+
+	if (!path || !out)
+		return -EINVAL;
+
+	filp = filp_open(path, O_RDONLY, 0);
+	if (IS_ERR(filp))
+		return PTR_ERR(filp);
+
+	n = kernel_read(filp, tmp, sizeof(tmp) - 1, &pos);
+	filp_close(filp, NULL);
+
+	if (n < 0)
+		return n;
+	if (!n)
+		return -EIO;
+
+	tmp[n] = '\0';
+
+	ret = kstrtoint(strim(tmp), 10, out);
+	if (ret)
+		return ret;
+
 	return 0;
 }
 
@@ -125,26 +174,6 @@ static int evx_get_battery_rm_mah(void)
 	return -ENODEV;
 }
 
-static const char *evx_battery_technology_name(int tech)
-{
-	switch (tech) {
-	case POWER_SUPPLY_TECHNOLOGY_NiMH:
-		return "NiMH";
-	case POWER_SUPPLY_TECHNOLOGY_LION:
-		return "Li-ion";
-	case POWER_SUPPLY_TECHNOLOGY_LIPO:
-		return "Li-poly";
-	case POWER_SUPPLY_TECHNOLOGY_LiFe:
-		return "LiFe";
-	case POWER_SUPPLY_TECHNOLOGY_NiCd:
-		return "NiCd";
-	case POWER_SUPPLY_TECHNOLOGY_LiMn:
-		return "LiMn";
-	case POWER_SUPPLY_TECHNOLOGY_UNKNOWN:
-	default:
-		return "Unknown";
-	}
-}
 
 static int evx_get_usb_current_now(void)
 {
@@ -176,21 +205,30 @@ static int evx_get_usb_current_now(void)
 static int evx_get_fast_chg_type(void)
 {
 	int online;
-	int current_ma;
+	int val;
 
-	if (evx_psy_get_int("usb", POWER_SUPPLY_PROP_ONLINE, &online) || !online)
-		return 0;
-
-	current_ma = evx_get_usb_current_now();
-	if (current_ma < 0)
+	if (evx_psy_get_int("usb", POWER_SUPPLY_PROP_ONLINE, &online) ||
+	    !online)
 		return 0;
 
 	/*
-	 * Real-derived state from USB power_supply current.
-	 * Existing backend value on CDP was around 845 mA => normal = 0.
-	 * Higher real input current means fast charging path is active.
+	 * Xiaomi's charger framework already classifies the negotiated charging
+	 * protocol. Forward that real classification instead of guessing from
+	 * an instantaneous current reading, which becomes zero on the PPS path.
 	 */
-	return current_ma >= 1500 ? 1 : 0;
+	if (!evx_read_int_file(EVX_XM_QUICK_CHARGE_TYPE_PATH, &val) &&
+	    val > 0)
+		return val;
+
+	/*
+	 * Fallback for authenticated Xiaomi fast charging when the protocol
+	 * classifier is temporarily unavailable.
+	 */
+	if (!evx_read_int_file(EVX_XM_FASTCHARGE_MODE_PATH, &val) &&
+	    val > 0)
+		return 1;
+
+	return 0;
 }
 
 static int evx_get_shell_temp_mc(void)
@@ -529,14 +567,29 @@ static DEVICE_ATTR_RO(battery_rm);
 static ssize_t charge_technology_show(struct device *dev,
 				      struct device_attribute *attr, char *buf)
 {
-	int tech;
-	int ret;
+	int online;
+	int val;
 
-	ret = evx_psy_get_int("battery", POWER_SUPPLY_PROP_TECHNOLOGY, &tech);
-	if (ret)
-		return ret;
+	/*
+	 * ColorOS meaning:
+	 *   0 = normal charger technology
+	 *   1 = fast charger technology
+	 *
+	 * This is not the battery chemistry field.
+	 */
+	if (evx_psy_get_int("usb", POWER_SUPPLY_PROP_ONLINE, &online) ||
+	    !online)
+		return sysfs_emit(buf, "0\n");
 
-	return sysfs_emit(buf, "%s\n", evx_battery_technology_name(tech));
+	if (!evx_read_int_file(EVX_XM_FASTCHARGE_MODE_PATH, &val) &&
+	    val > 0)
+		return sysfs_emit(buf, "1\n");
+
+	if (!evx_read_int_file(EVX_XM_QUICK_CHARGE_TYPE_PATH, &val) &&
+	    val > 0)
+		return sysfs_emit(buf, "1\n");
+
+	return sysfs_emit(buf, "0\n");
 }
 static DEVICE_ATTR_RO(charge_technology);
 
@@ -547,6 +600,70 @@ static ssize_t fast_chg_type_show(struct device *dev,
 	return sysfs_emit(buf, "%d\n", evx_get_fast_chg_type());
 }
 static DEVICE_ATTR_RO(fast_chg_type);
+
+/* /sys/class/oplus_chg/battery/fast_charge */
+static ssize_t fast_charge_show(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	int val;
+	int online;
+
+	if (evx_psy_get_int("usb", POWER_SUPPLY_PROP_ONLINE, &online) ||
+	    !online)
+		return sysfs_emit(buf, "0\n");
+
+	if (evx_read_int_file(EVX_XM_FASTCHARGE_MODE_PATH, &val))
+		return sysfs_emit(buf, "0\n");
+
+	return sysfs_emit(buf, "%d\n", val > 0 ? 1 : 0);
+}
+static DEVICE_ATTR_RO(fast_charge);
+
+/* /sys/class/oplus_chg/common/adapter_power */
+static ssize_t adapter_power_show(struct device *dev,
+				  struct device_attribute *attr, char *buf)
+{
+	int val;
+
+	/*
+	 * Xiaomi adapting_power can retain the previous adapter value after
+	 * switching to SDP/CDP. Never expose that stale value to ColorOS.
+	 */
+	if (evx_get_fast_chg_type() <= 0)
+		return sysfs_emit(buf, "0\n");
+
+	if (!evx_read_int_file(EVX_XM_POWER_MAX_PATH, &val) &&
+	    val > 0)
+		return sysfs_emit(buf, "%d\n", val);
+
+	if (!evx_read_int_file(EVX_XM_ADAPTING_POWER_PATH, &val) &&
+	    val > 0)
+		return sysfs_emit(buf, "%d\n", val);
+
+	return sysfs_emit(buf, "0\n");
+}
+static DEVICE_ATTR_RO(adapter_power);
+
+/* /sys/class/oplus_chg/common/protocol_type */
+static ssize_t protocol_type_show(struct device *dev,
+				  struct device_attribute *attr, char *buf)
+{
+	int val;
+
+	/*
+	 * Do not forward Xiaomi SDP/CDP/raw PD states as an OPlus fast-charge
+	 * protocol. Only expose protocol_type while fast charging is active.
+	 */
+	if (evx_get_fast_chg_type() <= 0)
+		return sysfs_emit(buf, "0\n");
+
+	if (evx_read_int_file(EVX_XM_PD_TYPE_PATH, &val) || val < 0)
+		return sysfs_emit(buf, "0\n");
+
+	return sysfs_emit(buf, "%d\n", val);
+}
+static DEVICE_ATTR_RO(protocol_type);
+
 
 /* /proc/charger/input_current_now */
 static int passedchg_proc_show(struct seq_file *m, void *v)
@@ -1243,9 +1360,19 @@ static int __init evx_cos_power_compat_init(void)
 		goto err_battery_dev;
 	}
 
+	oplus_common_dev = device_create(oplus_chg_class, NULL, MKDEV(0, 0),
+					 NULL, "common");
+	if (IS_ERR(oplus_common_dev)) {
+		ret = PTR_ERR(oplus_common_dev);
+		oplus_common_dev = NULL;
+		pr_err(EVX_NAME ": failed to create common device: %d\n",
+		       ret);
+		goto err_usb_dev;
+	}
+
 	ret = device_create_file(oplus_battery_dev, &dev_attr_chip_soc);
 	if (ret)
-		goto err_usb_dev;
+		goto err_common_dev;
 
 	ret = device_create_file(oplus_battery_dev, &dev_attr_battery_rm);
 	ret = device_create_file(oplus_battery_dev, &dev_attr_gauge_car_c);
@@ -1263,10 +1390,23 @@ static int __init evx_cos_power_compat_init(void)
 	if (ret)
 		goto err_remove_charge_technology;
 
+	ret = device_create_file(oplus_battery_dev, &dev_attr_fast_charge);
+	if (ret)
+		goto err_remove_fast_chg_type;
+
+	ret = device_create_file(oplus_common_dev, &dev_attr_adapter_power);
+	if (ret)
+		goto err_remove_fast_charge;
+
+	ret = device_create_file(oplus_common_dev, &dev_attr_protocol_type);
+	if (ret)
+		goto err_remove_adapter_power;
+
+
 	proc_charger_dir = proc_mkdir("charger", NULL);
 	if (!proc_charger_dir) {
 		ret = -ENOMEM;
-		goto err_remove_fast_chg_type;
+		goto err_remove_protocol_type;
 	}
 
 	proc_input_current_now = proc_create("input_current_now", 0444,
@@ -1303,6 +1443,12 @@ err_remove_input_current:
 	proc_remove(proc_input_current_now);
 err_remove_proc_charger:
 	proc_remove(proc_charger_dir);
+err_remove_protocol_type:
+	device_remove_file(oplus_common_dev, &dev_attr_protocol_type);
+err_remove_adapter_power:
+	device_remove_file(oplus_common_dev, &dev_attr_adapter_power);
+err_remove_fast_charge:
+	device_remove_file(oplus_battery_dev, &dev_attr_fast_charge);
 err_remove_fast_chg_type:
 	device_remove_file(oplus_usb_dev, &dev_attr_fast_chg_type);
 err_remove_charge_technology:
@@ -1312,6 +1458,9 @@ err_remove_battery_rm:
 	device_remove_file(oplus_battery_dev, &dev_attr_battery_rm);
 err_remove_chip_soc:
 	device_remove_file(oplus_battery_dev, &dev_attr_chip_soc);
+err_common_dev:
+	device_unregister(oplus_common_dev);
+	oplus_common_dev = NULL;
 err_usb_dev:
 	device_unregister(oplus_usb_dev);
 err_battery_dev:
@@ -1338,12 +1487,20 @@ static void __exit evx_cos_power_compat_exit(void)
 	if (proc_charger_dir)
 		proc_remove(proc_charger_dir);
 
+	if (oplus_common_dev) {
+		device_remove_file(oplus_common_dev, &dev_attr_protocol_type);
+		device_remove_file(oplus_common_dev, &dev_attr_adapter_power);
+		device_unregister(oplus_common_dev);
+		oplus_common_dev = NULL;
+	}
+
 	if (oplus_usb_dev) {
 		device_remove_file(oplus_usb_dev, &dev_attr_fast_chg_type);
 		device_unregister(oplus_usb_dev);
 	}
 
 	if (oplus_battery_dev) {
+		device_remove_file(oplus_battery_dev, &dev_attr_fast_charge);
 		device_remove_file(oplus_battery_dev, &dev_attr_charge_technology);
 		device_remove_file(oplus_battery_dev, &dev_attr_battery_rm);
 		device_remove_file(oplus_battery_dev, &dev_attr_chip_soc);

@@ -392,6 +392,17 @@ static struct kyber_queue_data *kyber_queue_data_alloc(struct request_queue *q)
 		kqd->latency_targets[i] = kyber_latency_targets[i];
 	}
 
+	/*
+	 * The preferred Rodin userdata queue uses a tighter read target for
+	 * interactive storage latency while retaining Kyber's conservative
+	 * synchronous-write target. Queue depths, batching and adaptive
+	 * feedback remain upstream defaults.
+	 */
+	if (test_bit(QUEUE_FLAG_PREFER_KYBER, &q->queue_flags)) {
+		kqd->latency_targets[KYBER_READ] = 1500000ULL;
+		kqd->latency_targets[KYBER_WRITE] = 10000000ULL;
+	}
+
 	return kqd;
 
 err_buckets:
@@ -1047,7 +1058,16 @@ static void __exit kyber_exit(void)
 	elv_unregister(&kyber_sched);
 }
 
+/*
+ * Built-in Kyber must register before storage device probing so queues
+ * carrying QUEUE_FLAG_PREFER_KYBER can select it during disk creation.
+ * Preserve normal module initialization when Kyber is built as a module.
+ */
+#ifdef MODULE
 module_init(kyber_init);
+#else
+subsys_initcall(kyber_init);
+#endif
 module_exit(kyber_exit);
 
 MODULE_AUTHOR("Omar Sandoval");

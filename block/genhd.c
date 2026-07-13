@@ -6,6 +6,7 @@
  */
 
 #include <linux/module.h>
+#include <linux/string.h>
 #include <linux/ctype.h>
 #include <linux/fs.h>
 #include <linux/kdev_t.h>
@@ -382,6 +383,49 @@ int disk_scan_partitions(struct gendisk *disk, blk_mode_t mode)
 	return ret;
 }
 
+/*
+ * Rodin userdata is exposed by the SCSI disk layer as UFS logical unit 2.
+ *
+ * The MediaTek UFS host implementation is supplied by a vendor module, so
+ * select the initial scheduler in the built-in block registration path.
+ *
+ * Identification deliberately does not depend on the assigned disk name
+ * such as sdc. It requires both:
+ *
+ *   1. SCSI parent LUN 2
+ *   2. the Rodin UFS controller ancestor 112b0000.ufshci
+ */
+static bool rodin_is_userdata_ufs_lun2(struct device *parent)
+{
+	struct device *dev;
+	const char *parent_name;
+	const char *lun_string;
+	unsigned long long lun;
+
+	if (!parent)
+		return false;
+
+	parent_name = dev_name(parent);
+	if (!parent_name)
+		return false;
+
+	lun_string = strrchr(parent_name, ':');
+	if (!lun_string)
+		return false;
+
+	if (kstrtoull(lun_string + 1, 10, &lun) || lun != 2)
+		return false;
+
+	for (dev = parent; dev; dev = dev->parent) {
+		const char *name = dev_name(dev);
+
+		if (name && !strcmp(name, "112b0000.ufshci"))
+			return true;
+	}
+
+	return false;
+}
+
 /**
  * device_add_disk - add disk information to kernel list
  * @parent: parent device for the disk
@@ -408,6 +452,14 @@ int __must_check device_add_disk(struct device *parent, struct gendisk *disk,
 	 * elevator if one is needed, that is, for devices requesting queue
 	 * registration.
 	 */
+	/*
+	 * Set the driver preference before elevator initialization. This makes
+	 * Kyber the initial scheduler rather than switching a live userdata
+	 * queue after registration.
+	 */
+	if (rodin_is_userdata_ufs_lun2(parent))
+		blk_queue_flag_set(QUEUE_FLAG_PREFER_KYBER, disk->queue);
+
 	elevator_init_mq(disk->queue);
 
 	/* Mark bdev as having a submit_bio, if needed */
