@@ -1,0 +1,8 @@
+# Default review ownership
+* @NEESCHAL-3
+
+# EVONIX-specific implementation and documentation
+/arch/arm64/configs/evonix.config @NEESCHAL-3
+/drivers/misc/evonix_cos/ @NEESCHAL-3
+/drivers/misc/evonix_rodin/ @NEESCHAL-3
+/Documentation/evonix/ @NEESCHAL-3

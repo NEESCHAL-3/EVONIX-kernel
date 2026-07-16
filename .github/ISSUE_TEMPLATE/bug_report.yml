@@ -1,0 +1,50 @@
+name: Bug report
+description: Report a reproducible EVONIX kernel problem
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not disclose an unpatched vulnerability here. Use the private security advisory link in SECURITY.md.
+  - type: input
+    id: commit
+    attributes:
+      label: Kernel commit or tag
+      description: Paste the full commit ID or exact tag from the tested build.
+    validations:
+      required: true
+  - type: input
+    id: device_rom
+    attributes:
+      label: Device and ROM
+      placeholder: Poco X7 Pro (rodin), ROM name and build
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Explain the expected and actual behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction steps
+      description: Provide the smallest reliable sequence that triggers the issue.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Relevant logs and evidence
+      description: Remove credentials, serial numbers, personal data, and proprietary vendor content before posting.
+  - type: checkboxes
+    id: recovery
+    attributes:
+      label: Safety confirmation
+      options:
+        - label: I have a known-good boot image and recovery method.
+          required: true

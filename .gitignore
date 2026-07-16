@@ -57,14 +57,17 @@ modules.order
 #
 # Top-level generic files
 #
+/build-*.log
 /linux
 /modules-only.symvers
+/out/
 /vmlinux
 /vmlinux.32
 /vmlinux.map
 /vmlinux.symvers
 /vmlinux-gdb.py
 /vmlinuz
+/workspace_status.json
 /System.map
 /Module.markers
 /modules.builtin
@@ -99,6 +102,8 @@ modules.order
 !.cocciconfig
 !.get_maintainer.ignore
 !.gitattributes
+!.github/
+!.github/**
 !.gitignore
 !.kunitconfig
 !.mailmap

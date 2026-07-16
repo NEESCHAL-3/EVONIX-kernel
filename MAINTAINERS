@@ -7829,6 +7829,18 @@ F:	include/uapi/linux/mdio.h
 F:	include/uapi/linux/mii.h
 F:	net/core/of_net.c
 
+EVONIX KERNEL FOR POCO X7 PRO (RODIN)
+M:	NEESCHAL-3 <Nischalkhadka022@gmail.com>
+S:	Maintained
+W:	https://github.com/NEESCHAL-3/EVONIX-kernel
+F:	.github/
+F:	Documentation/evonix/
+F:	README.md
+F:	arch/arm64/configs/evonix.config
+F:	drivers/misc/evonix_cos/
+F:	drivers/misc/evonix_rodin/
+N:	evonix
+
 EXEC & BINFMT API
 R:	Eric Biederman <ebiederm@xmission.com>
 R:	Kees Cook <keescook@chromium.org>

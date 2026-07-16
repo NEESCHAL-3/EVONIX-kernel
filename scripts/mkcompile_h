@@ -2,7 +2,7 @@
 
 # EVONIX_BUILD_IDENTITY_BEGIN
 #
-# Override Kleaf's reproducible placeholder identity. The timestamp is
+# Override Kleaf's reproducible placeholder identity for EVONIX builds.
 KBUILD_BUILD_USER="Neeschal"
 KBUILD_BUILD_HOST="code"
 
